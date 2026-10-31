@@ -1,0 +1,27 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  core-tests-linux:
+    runs-on: ubuntu-latest
+    container: swift:6.0
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift test
+
+  ios-build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Core tests (macOS)
+        run: swift test
+      - name: Generate Xcode project
+        run: brew install xcodegen && xcodegen generate
+      - name: Build app for simulator
+        run: |
+          xcodebuild -project M9rofi.xcodeproj -scheme M9rofi \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build | tail -50
+          test ${PIPESTATUS[0]} -eq 0

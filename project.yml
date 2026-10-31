@@ -1,0 +1,52 @@
+# Generate the Xcode project on a Mac:  brew install xcodegen && xcodegen generate
+name: M9rofi
+options:
+  bundleIdPrefix: com.personal.m9rofi
+  deploymentTarget:
+    iOS: "17.0"
+  developmentLanguage: ar
+packages:
+  FinanceCore:
+    path: .
+  CoreXLSX:
+    url: https://github.com/CoreOffice/CoreXLSX
+    from: "0.14.1"
+targets:
+  M9rofi:
+    type: application
+    platform: iOS
+    sources:
+      - path: App/M9rofi
+    dependencies:
+      - package: FinanceCore
+      - package: CoreXLSX
+    info:
+      path: App/M9rofi/Info.plist
+      properties:
+        CFBundleDisplayName: مصروفي
+        CFBundleDevelopmentRegion: ar
+        CFBundleLocalizations: [ar, en]
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSFaceIDUsageDescription: يستخدم مصروفي Face ID لحماية بياناتك المالية.
+        ITSAppUsesNonExemptEncryption: false
+        LSSupportsOpeningDocumentsInPlace: false
+        UIFileSharingEnabled: false
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Bank Statement
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [public.comma-separated-values-text, com.adobe.pdf, org.openxmlformats.spreadsheetml.sheet, com.apple.mail.email, public.plain-text]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.personal.m9rofi
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        INFOPLIST_KEY_UIUserInterfaceStyle: ""
+        CODE_SIGN_STYLE: Automatic
+schemes:
+  M9rofi:
+    build:
+      targets:
+        M9rofi: all
+    test:
+      targets: []
