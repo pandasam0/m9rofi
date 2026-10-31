@@ -129,7 +129,8 @@ export const KIND_RULES = [
   ['income', ['راتب', 'الراتب', 'salary', 'payroll', 'رواتب']],
   ['cashWithdrawal', ['سحب نقدي', 'سحب صراف', 'صراف آلي', 'سحب من الصراف', 'atm withdrawal', 'cash withdrawal', 'atm']],
   ['cashDeposit', ['إيداع نقدي', 'ايداع نقدي', 'cash deposit']],
-  ['transferIn', ['حوالة واردة', 'تحويل وارد', 'حوالة محلية واردة', 'حوالة دولية واردة', 'incoming transfer', 'transfer received', 'received a transfer', 'inward transfer', 'إيداع حوالة', 'ايداع حوالة', 'استلام حوالة']],
+  ['transferIn', ['حوالة واردة', 'تحويل وارد', 'حوالة محلية واردة', 'حوالة دولية واردة', 'incoming transfer', 'transfer received', 'received a transfer', 'inward transfer', 'إيداع حوالة', 'ايداع حوالة', 'استلام حوالة',
+    'اضافة باستخدام', 'إضافة باستخدام', 'اضافة رصيد', 'إضافة رصيد', 'تعبئة المحفظة', 'top up', 'top-up', 'money added']],
   ['transferOut', ['حوالة صادرة', 'تحويل صادر', 'حوالة محلية صادرة', 'حوالة دولية', 'outgoing transfer', 'outward transfer', 'transfer to', 'تحويل إلى', 'تحويل الى', 'حوالة إلى', 'حوالة الى', 'حوالة داخلية', 'حوالة فورية', 'sarie', 'سريع', 'transfer sent']],
   ['billPayment', ['سداد فاتورة', 'سداد فواتير', 'سداد', 'sadad', 'bill payment', 'فاتورة', 'مدفوعات حكومية', 'government payment']],
   ['fee', ['رسوم', 'عمولة', 'fee', 'charges', 'commission']],
@@ -169,7 +170,8 @@ const ACCT_RE = /(?:من حساب|حساب|الحساب|account|acct|a\/c|ac)[^\
 const REF_RE = /(?:مرجع|الرقم المرجعي|رقم العملية|رقم المرجع|ref(?:erence)?(?:\s*no)?\.?)\s*[:：#]?\s*([A-Za-z0-9]{5,})/i;
 const cap = (re, t) => { const m = re.exec(t); return m ? (m[1] || m[2] || null) : null; };
 // SNB style: a line "من 2002*" = debited account last 4.
-const ACCT_LINE_RE = /^\s*من\s*\*?(\d{4})\*?\s*$/m;
+const ACCT_LINE_RE = /^\s*من\s*[:：]?\s*\*?(\d{4})\*?\s*$/m;
+const TO_LINE_RE = /^\s*(?:إلى|الى)\s*[:：]?\s*\*?(\d{4})\*?\s*$/m;
 
 // "لحساب2002" = destination account (not the debited one).
 const TO_ACCT_RE = /(?:لحساب|للحساب|إلى حساب|الى حساب|to account)\s*[:：]?\s*\*?\s*(\d{4})(?!\d)/gi;
@@ -275,12 +277,27 @@ export function parseSMS(text, sender = null, receivedAt = Date.now(), templates
   // Balance written without currency, e.g. Barq "رصيد106.78"
   if (balance === null) { const bm = /(?:الرصيد|رصيد|balance)\s*[:：]?\s*(\d[\d,]*(?:\.\d{1,2})?)/i.exec(n); if (bm) balance = parseHalalas(bm[1]); }
   let cpAcct = counterpartyAccount(n);
-  // SNB incoming transfer: "من KHALIL SAMMAN 0032*" → sender account last 4
-  if (!cpAcct && kind === 'transferIn') { const m = /من\s+[^\n]*?\*?(\d{4})\*/.exec(n); if (m) cpAcct = m[1]; }
+  let card = cap(CARD_RE, n);
+  // "رقم الحساب: *0529" after "إلى" in an outgoing transfer is the beneficiary, not the debited account.
+  const ownText = n.replace(TO_ACCT_RE, ' ').replace(kind === 'transferOut' ? /رقم الحساب\s*[:：]?\s*\*?\d{4}/g : /$^/, ' ');
+  let acct = cap(ACCT_LINE_RE, n) || cap(ACCT_RE, ownText);
+  if (kind === 'transferIn') {
+    // SNB: "من KHALIL SAMMAN 0032*" / "من9705* رامي سمان" → sender account last 4 and name
+    if (!cpAcct) { const m = /من\s*[^\n]*?\*?(\d{4})\*/.exec(n); if (m) cpAcct = m[1]; }
+    if (!counterparty) { const m = /من\s*\*?\d{4}\*\s*(\p{L}[^\n]*)$/mu.exec(n); if (m) counterparty = m[1].trim(); }
+    // D360 top-up: "بطاقة:*3098 … إلى:*9631" → credited account is 9631; the card is the (own) source.
+    const to = cap(TO_LINE_RE, n);
+    if (to) { acct = to; if (card) cpAcct = card; card = null; }
+  }
+  if (kind === 'transferOut') {
+    // SNB: "ل2405* رناد سمان"
+    if (!cpAcct) { const m = /(?:^|\s)ل\s*\*?(\d{4})\*/m.exec(n); if (m) cpAcct = m[1]; }
+    if (!counterparty) { const m = /(?:^|\s)ل\s*\*?\d{4}\*\s*(\p{L}[^\n]*)$/mu.exec(n); if (m) counterparty = m[1].trim(); }
+  }
   const pd = parseDate(n);
   return { type: 'record', rec: { source: 'sms', id, amount, currency, base, direction, kind, status,
     ts: pd?.ts ?? receivedAt, hasTime: pd ? pd.hasTime : true, merchant, counterparty,
-    card: cap(CARD_RE, n), acct: cap(ACCT_RE, n.replace(TO_ACCT_RE, ' ')) || cap(ACCT_LINE_RE, n), cpAcct, balance, ref: cap(REF_RE, n), hint: sender,
+    card, acct, cpAcct, balance, ref: cap(REF_RE, n), hint: sender,
     confidence: Math.max(0, confidence) } };
 }
 
@@ -623,15 +640,19 @@ function findRefundTarget(state, tx) {
 
 const INST_NAMES = { snb: ['snb', 'alahli', 'الأهلي', 'الاهلي', 'ncb'], barq: ['barq', 'برق'], d360: ['d360', 'd 360'] };
 
+const numbersOf = (state, id) => { const a = state.accounts.find(x => x.id === id); return a ? [...a.cards, ...a.numbers] : []; };
 function isPair(state, debit, credit) {
   if (!['transferIn', 'unknown', 'cardPayment', 'cashDeposit'].includes(credit.kind)) return false;
+  if (credit.cpAcct && (credit.cpAcct === debit.card || numbersOf(state, debit.accountId).includes(credit.cpAcct))) return true;
+  if (debit.cpAcct && numbersOf(state, credit.accountId).includes(debit.cpAcct)) return true;
   if (['transferOut', 'unknown'].includes(debit.kind)) return true;
   if (debit.kind === 'cardPayment') return state.accounts.find(a => a.id === credit.accountId)?.type === 'creditCard' || credit.kind === 'cardPayment';
   if (debit.kind === 'purchase') {
     const recv = state.accounts.find(a => a.id === credit.accountId);
-    if (!recv || !debit.mkey) return false;
+    if (!recv || !debit.merchant) return false;
+    const raw = normDigits(debit.merchant).toLowerCase();
     const names = [recv.name.toLowerCase(), ...(INST_NAMES[recv.institution] || [])];
-    return names.some(n => n && debit.mkey.includes(n));
+    return names.some(n => n && raw.includes(n));
   }
   return false;
 }
