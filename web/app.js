@@ -32,7 +32,7 @@ window.__m9reply = (id, value) => { const f = pending[id]; delete pending[id]; i
 window.__m9ingest = async text => {
   const items = E.parseInbox(text, state.templates);
   if (!items.length) return 0;
-  const r = E.ingest(state, items, now());
+  const r = E.record(state, items, now());
   await commit(r);
   return r.added.length;
 };
@@ -175,7 +175,7 @@ async function syncInbox() {
   const f = await pickFile('.txt,text/plain');
   if (!f) return;
   const items = E.parseInbox(await f.text(), state.templates);
-  const r = E.ingest(state, items, now());
+  const r = E.record(state, items, now());
   await commit(r);
   sheet(`<h3>تم التحديث</h3><p>${reportText(r)}</p><p class="muted">قرأت ${items.length} رسالة. الرسائل القديمة المسجلة مسبقاً لا تتكرر.</p><button class="wide" id="ok">تم</button>`);
   $('#ok').onclick = closeSheet;
@@ -230,10 +230,10 @@ function txDetail(id) {
     <button class="wide ghost" id="ex">${t.excluded ? 'تضمين في الإجماليات' : 'استبعاد من الإجماليات'}</button>
     ${!t.internal && ['transferOut', 'transferIn'].includes(t.kind) ? '<button class="wide ghost" id="int">تحويل بين حساباتي</button>' : ''}
     <button class="wide danger" id="del">حذف</button>`);
-  $('#save').onclick = async () => { E.recategorize(state, id, $('#c').value, $('#learn').checked); closeSheet(); await commit(); };
-  $('#ex').onclick = async () => { t.excluded = !t.excluded; closeSheet(); await commit(); };
-  if ($('#int')) $('#int').onclick = async () => { E.resolve(state, id, 'internal'); closeSheet(); await commit(); };
-  $('#del').onclick = async () => { if (await askYesNo('حذف العملية؟')) { E.deleteTx(state, id); closeSheet(); await commit(); } };
+  $('#save').onclick = async () => { E.userOp(state, id, { op: 'cat', category: $('#c').value, learn: $('#learn').checked }); closeSheet(); await commit(); };
+  $('#ex').onclick = async () => { E.userOp(state, id, { op: 'exclude', value: !t.excluded }); closeSheet(); await commit(); };
+  if ($('#int')) $('#int').onclick = async () => { E.userOp(state, id, { op: 'resolve', action: 'internal' }); closeSheet(); await commit(); };
+  $('#del').onclick = async () => { if (await askYesNo('حذف العملية؟')) { E.userOp(state, id, { op: 'delete' }); closeSheet(); await commit(); } };
   if ($('#fix')) $('#fix').onclick = () => reviewDetail(id);
 }
 
@@ -257,7 +257,7 @@ function addTx() {
       kind: dir === 'debit' ? 'purchase' : (cat === 'salary' ? 'income' : 'transferIn'), status: 'completed',
       ts: new Date($('#dt').value).getTime() || now(), hasTime: true, merchant: $('#mer').value.trim() || null,
       accountId: $('#ac').value || null, category: cat };
-    const r = E.ingest(state, [rec], now());
+    const r = E.record(state, [rec], now());
     closeSheet(); await commit(r);
   };
 }
@@ -294,7 +294,7 @@ function reviewDetail(id) {
     if ($('#amt')) data.amount = E.parseHalalas($('#amt').value);
     if ($('#base')) data.base = E.parseHalalas($('#base').value);
     if ($('#dir')) data.direction = $('#dir').value;
-    E.resolve(state, id, b.dataset.a, data);
+    E.userOp(state, id, { op: 'resolve', action: b.dataset.a, data });
     closeSheet(); await commit();
   });
 }
@@ -465,13 +465,13 @@ function importView() {
   $('#csv').onclick = async () => {
     const f = await pickFile('.csv,text/csv,text/plain'); if (!f) return;
     const res = E.importStatement(E.parseCSV(await f.text()), $('#ac').value);
-    const r = E.ingest(state, res.records.map(rec => ({ type: 'record', rec })), now());
+    const r = E.record(state, res.records.map(rec => ({ type: 'record', rec })), now());
     if (res.closing) state.balances.push({ accountId: $('#ac').value, balance: res.closing.balance, ts: res.closing.ts, source: 'statement' });
     await commit(r); location.hash = 'importView'; show(r, res.skipped.length ? `<p class="orange">${res.skipped.slice(0, 10).map(h).join('<br>')}</p>` : '');
   };
   $('#paste').onclick = async () => {
     const blocks = $('#txt').value.split(/\n\s*\n/).filter(b => b.trim());
-    const r = E.ingest(state, blocks.map(b => E.parseSMS(b, null, now(), state.templates)), now());
+    const r = E.record(state, blocks.map(b => E.parseSMS(b, null, now(), state.templates)), now());
     await commit(r); location.hash = 'importView'; show(r);
   };
   $('#inbox').onclick = syncInbox;
@@ -517,7 +517,7 @@ function guide() {
 
 // ───────────── Boot ─────────────
 (async () => {
-  try { const s = HOST ? HOST.state : await load(); if (s) { state = { ...E.newState(), ...s, settings: { ...E.newState().settings, ...s.settings } }; const m = E.migrate(state); if (E.refreshCategories(state) || m) await save(); } } catch { /* first run */ }
+  try { const s = HOST ? HOST.state : await load(); if (s) { state = { ...E.newState(), ...s, settings: { ...E.newState().settings, ...s.settings } }; const m = E.upgrade(state); if (E.refreshCategories(state) || m) await save(); } } catch { /* first run */ }
   if (!HOST && navigator.storage?.persist) navigator.storage.persist();
   if (!HOST && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   render();

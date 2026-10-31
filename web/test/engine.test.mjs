@@ -251,3 +251,55 @@ test('non-family transfer is not spending unless the user categorises it', () =>
   const old = E.newState(); old.settings = { externalTransfersAsSpending: true };
   assert.equal(E.migrate(old), true); assert.equal(old.settings.externalTransfersAsSpending, false);
 });
+
+test('self-healing: legacy wrong D360 entries are fixed automatically on upgrade', () => {
+  const st = L(); st.settings.ownerNames = ['خليل سمان', 'KHALIL SAMMAN'];
+  st.accounts[0].numbers = ['2002']; st.accounts[0].cards = ['3098']; st.accounts[2].numbers = ['9631']; st.accounts[2].type = 'wallet';
+  const base = { currency: 'SAR', direction: 'debit', status: 'completed', hasTime: true, card: '3098', accountId: 'snb-0001', internal: false, link: null,
+    review: [], excluded: false, created: 0, catConf: 0, counterparty: null, acct: null, cpAcct: null, ref: null, note: null };
+  delete st.parserVersion; delete st.log;
+  st.txs = [
+    { ...base, id: 'a', amount: 25000, base: 25000, kind: 'purchase', ts: D('2026-10-31 20:06'), merchant: 'MYSR D360', mkey: 'mysr d', category: 'other', catSource: 'none', sources: [{ type: 'sms', id: 'x1' }] },
+    { ...base, id: 'b', amount: 25000, base: 25000, kind: 'purchase', ts: D('2026-10-31 20:06') + 23000, merchant: null, mkey: null, category: 'other', catSource: 'none', sources: [{ type: 'sms', id: 'x2' }] },
+    { ...base, id: 'c', amount: 25000, base: 25000, kind: 'transferOut', ts: D('2026-10-31 20:00'), merchant: null, mkey: 'رناد سمان', counterparty: 'رناد سمان', category: 'transfers', catSource: 'kind', sources: [{ type: 'sms', id: 'x3' }] },
+  ];
+  assert.equal(E.upgrade(st), true);
+  E.refreshCategories(st);
+  const m = month(st);
+  assert.equal(m.spending, 25000);
+  assert.deepEqual(m.byCategory.map(c => c.category), ['family']);
+  assert.equal(m.internalCount, 2);
+});
+
+test('self-healing: rebuild re-parses history and keeps user corrections', () => {
+  const st = L();
+  const inbox = '###|sms\nشراء-POS\nبـSAR 40\nمن Shahrazad\nمدى-ابل*1234\nفي 13:00 20/10/26\n';
+  E.record(st, E.parseInbox(inbox), NOW);
+  const t = st.txs[0];
+  assert.equal(t.category, 'other');
+  E.userOp(st, t.id, { op: 'cat', category: 'dining', learn: true });
+  st.parserVersion = 0;                      // simulate a parser update
+  assert.equal(E.upgrade(st), true);
+  assert.equal(st.txs.length, 1);
+  assert.equal(st.txs[0].category, 'dining');
+  assert.equal(month(st).spending, 4000);
+});
+
+test('Apple Intelligence hint categorises unknown merchants only', () => {
+  const st = L();
+  E.record(st, E.parseInbox('###|sms\n@ai: Restaurant\nشراء-POS\nبـSAR 40\nمن Shahrazad\nمدى-ابل*1234\nفي 13:00 20/10/26\n' +
+    '###|sms\n@ai: dining\nشراء-POS\nبـSAR 18\nمن STARBUCKS\nمدى-ابل*1234\nفي 08:00 21/10/26\n'), NOW);
+  const sh = st.txs.find(t => t.merchant === 'Shahrazad'), sb = st.txs.find(t => t.merchant === 'STARBUCKS');
+  assert.deepEqual([sh.category, sh.catSource], ['dining', 'ai']);
+  assert.deepEqual([sb.category, sb.catSource], ['coffee', 'dictionary']);
+  assert.equal(E.aiCategory('القهوة'), 'coffee');
+  assert.equal(E.aiCategory('Groceries.'), 'groceries');
+  assert.equal(E.aiCategory('blah'), null);
+});
+
+test('card top-up to own wallet is internal even without the wallet message', () => {
+  const st = L();
+  E.record(st, [E.parseSMS('شراء انترنت\nبـSAR 150\nمن 2002*\nمن barq\nمدى-ابل *1234\nفي 17:05 31/10/26', null, 0)], NOW);
+  assert.equal(st.txs[0].internal, true);
+  assert.equal(month(st).spending, 0);
+});
