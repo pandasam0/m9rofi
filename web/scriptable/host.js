@@ -101,13 +101,54 @@ async function runWidget() {
   Script.setWidget(w);
 }
 
+const SRC_URL = 'https://pandasam0.github.io/m9rofi/scriptable.js';
+const CACHE = P('app.js');
+
+/** Download the latest app, bypassing caches. Returns { changed, build }. */
+async function downloadUpdate() {
+  const req = new Request(SRC_URL + '?t=' + Date.now());
+  req.timeoutInterval = 15;
+  req.headers = { 'Cache-Control': 'no-cache' };
+  const code = await req.loadString();
+  if (!code || !code.startsWith('// M9ROFI_APP')) throw new Error('bad download');
+  const old = fm.fileExists(CACHE) ? fm.readString(CACHE) : '';
+  if (code !== old) fm.writeString(CACHE, code);
+  const m = /APP_BUILD = "([^"]+)"/.exec(code);
+  return { changed: code !== old, build: m ? m[1] : '' };
+}
+
+/** Older loaders fetched without a cache-buster; patch the user's script once so updates arrive immediately. */
+function patchLoader() {
+  try {
+    const path = fm.joinPath(fm.documentsDirectory(), Script.name() + '.js');
+    if (!fm.fileExists(path)) return;
+    const src = fm.readString(path);
+    if (src.includes('github.io/m9rofi/scriptable.js') && src.includes('new Request(SRC)'))
+      fm.writeString(path, src.replace('new Request(SRC)', 'new Request(SRC + "?t=" + Date.now())'));
+  } catch (e) {}
+}
+
+/** One backup per day of state.json, last 7 kept, in the same iCloud folder. */
+function dailyBackup() {
+  try {
+    if (!fm.fileExists(STATE)) return;
+    const day = new Date().toISOString().slice(0, 10);
+    const b = P(`backup-${day}.json`);
+    if (!fm.fileExists(b)) fm.writeString(b, fm.readString(STATE));
+    const olds = fm.listContents(DIR).filter(n => /^backup-\d{4}-\d{2}-\d{2}\.json$/.test(n)).sort();
+    for (const n of olds.slice(0, Math.max(0, olds.length - 7))) fm.remove(P(n));
+  } catch (e) {}
+}
+
 // ── App mode: full UI in a WebView; the page is the single writer of state.json. ──
 async function runApp() {
+  patchLoader();
+  dailyBackup();
   const state = await loadState();
   const safe = s => JSON.stringify(s).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   const html = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><style>${CSS_SRC}</style></head>
-<body>${BODY_SRC}<script>window.__M9HOST__ = { state: ${safe(state)} };</script>
+<body>${BODY_SRC}<script>window.__M9HOST__ = { state: ${safe(state)}, build: ${safe(APP_BUILD)} };</script>
 <script>${ENGINE_WRAPPED}\n${APP_SRC}</script></body></html>`;
   const wv = new WebView();
   await wv.loadHTML(html);
@@ -131,6 +172,10 @@ async function runApp() {
       let text = null;
       try { const paths = await DocumentPicker.open(); if (paths && paths[0]) text = FileManager.local().readString(paths[0]); } catch (e) {}
       await wv.evaluateJavaScript(`window.__m9reply(${req.id}, ${safe(text)}); 0`, false);
+    } else if (req.type === 'update') {
+      let result;
+      try { result = await downloadUpdate(); } catch (e) { result = { error: String(e) }; }
+      await wv.evaluateJavaScript(`window.__m9reply(${req.id}, ${safe(result)}); 0`, false);
     } else if (req.type === 'share') {
       // Save the file via the iOS Files picker (CSV report or JSON backup).
       try { await DocumentPicker.exportString(req.content, req.name); } catch (e) {}

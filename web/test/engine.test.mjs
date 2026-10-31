@@ -303,3 +303,17 @@ test('card top-up to own wallet is internal even without the wallet message', ()
   assert.equal(st.txs[0].internal, true);
   assert.equal(month(st).spending, 0);
 });
+
+test('upgrade never loses transactions (empty log saved by an older build)', () => {
+  const st = L();
+  E.ingest(st, [S(starbucks), S(panda)], NOW);          // ingested without history (old build)
+  st.log = []; st.parserVersion = 3;                     // what an older build saved
+  E.upgrade(st);
+  assert.equal(st.txs.length, 2);
+  assert.equal(month(st).spending, 14550);
+  E.record(st, [S(salary)], NOW);
+  st.parserVersion = 1; E.upgrade(st);
+  assert.equal(st.txs.length, 3);
+  assert.equal(E.reprocess(st), true);
+  assert.equal(st.txs.length, 3);
+});

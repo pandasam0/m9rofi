@@ -225,7 +225,7 @@ function labelled(text, labels) {
 }
 
 /** Bump when parsing/matching rules change: saved message history is re-processed automatically. */
-export const PARSER_VERSION = 4;
+export const PARSER_VERSION = 5;
 
 /** Parse one bank message. Returns {type:'record', rec} | {type:'balance', ...} | {type:'ignored', reason} | {type:'unparseable'}.
  *  Every outcome carries .src (the raw message) so history can be re-parsed after parser improvements. */
@@ -853,12 +853,50 @@ export function rebuild(state, now = Date.now()) {
   state.parserVersion = PARSER_VERSION;
 }
 
-/** Bring saved data up to date. Returns true if it changed. */
+/** Source id an SMS log entry produces (must match parseSMS). */
+const smsSourceId = text => 'sms:' + fnv1a(normDigits(text).trim());
+
+/** Safety invariant: every current transaction is reproducible from the log. Transactions whose
+ *  sources are not covered (received before history was kept) are stored verbatim. */
+function ensureLogCoversTxs(state) {
+  state.log ||= [];
+  state.ops ||= [];
+  const covered = new Set();
+  for (const e of state.log) {
+    if (e.k === 'sms') covered.add(smsSourceId(e.text));
+    else if (e.k === 'rec') covered.add(e.rec.id);
+    else if (e.k === 'tx') for (const s of e.tx.sources) covered.add(s.id);
+  }
+  const legacy = state.txs.filter(t => !t.sources.some(s => covered.has(s.id))).map(t => ({ k: 'tx', tx: JSON.parse(JSON.stringify(t)) }));
+  if (legacy.length) state.log.unshift(...legacy);
+  return legacy.length > 0;
+}
+
+/** Bring saved data up to date. Returns true if it changed. Never drops a transaction. */
 export function upgrade(state) {
   let changed = migrate(state);
-  if (!state.log) { state.log = state.txs.map(t => ({ k: 'tx', tx: t })); state.ops = []; changed = true; }
-  if (state.parserVersion !== PARSER_VERSION) { rebuild(state); changed = true; }
+  if (ensureLogCoversTxs(state)) changed = true;
+  if (state.parserVersion !== PARSER_VERSION) {
+    const before = state.txs.length;
+    const snapshot = JSON.stringify({ txs: state.txs, balances: state.balances, seen: state.seen, ignored: state.ignored });
+    rebuild(state);
+    // Merging can reduce the count slightly; a large drop means something is wrong → keep the old data.
+    if (state.txs.length < before * 0.8) Object.assign(state, JSON.parse(snapshot));
+    state.parserVersion = PARSER_VERSION;
+    changed = true;
+  }
   return changed;
+}
+
+/** Re-check all transactions with the current rules (button in settings). */
+export function reprocess(state) {
+  ensureLogCoversTxs(state);
+  const before = state.txs.length;
+  const snapshot = JSON.stringify({ txs: state.txs, balances: state.balances, seen: state.seen, ignored: state.ignored });
+  rebuild(state);
+  if (state.txs.length < before * 0.8) { Object.assign(state, JSON.parse(snapshot)); return false; }
+  refreshCategories(state);
+  return true;
 }
 
 /** One-time rule migrations for saved data. Returns true if anything changed. */
