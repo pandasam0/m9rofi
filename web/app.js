@@ -84,7 +84,18 @@ function pickFile(accept) {
 }
 
 function reportText(r) {
-  return `أضيفت ${r.added.length} · دُمجت ${r.merged.length} · مسجلة مسبقاً ${r.dup} · للمراجعة ${r.review.length} · تحويلات داخلية ${r.internal} · متجاهلة ${r.ignored}`;
+  return (r.recovered ? `أُعيدت قراءة ${r.recovered} عملية قديمة · ` : '') + `أضيفت ${r.added.length} · دُمجت ${r.merged.length} · مسجلة مسبقاً ${r.dup} · للمراجعة ${r.review.length} · تحويلات داخلية ${r.internal} · متجاهلة ${r.ignored}`;
+}
+
+/** Human name for a transaction: merchant, person, or "تحويل إلى/من <own account>". */
+function txName(t) {
+  if (t.merchant || t.counterparty) return t.merchant || t.counterparty;
+  const own = state.accounts.find(a => t.cpAcct && [...a.cards, ...a.numbers].includes(t.cpAcct));
+  if (own) return `${t.direction === 'debit' ? 'تحويل إلى' : 'تحويل من'} ${own.name}`;
+  const linked = t.link && state.txs.find(x => x.id === t.link);
+  const la = linked && acct(linked.accountId);
+  if (la) return `${t.direction === 'debit' ? 'تحويل إلى' : 'تحويل من'} ${la.name}`;
+  return E.catName(t.category);
 }
 
 function txRow(t) {
@@ -93,7 +104,7 @@ function txRow(t) {
   const color = ['income', 'refund', 'transferIn'].includes(e.type) ? 'green' : ['pending', 'unconfirmed'].includes(e.type) ? 'orange' : ['internal', 'excluded', 'cash'].includes(e.type) ? 'muted' : '';
   return `<div class="row" data-tx="${h(t.id)}">
     <div class="ic">${E.catIcon(t.category)}</div>
-    <div class="mid"><div>${h(t.merchant || t.counterparty || E.catName(t.category))}</div>
+    <div class="mid"><div>${h(txName(t))}</div>
       <div class="muted">${h(E.catName(t.category))} · <span class="num">${E.fmtDate(t.ts, t.hasTime)}</span></div></div>
     <div class="end"><div class="num ${color} ${e.type === 'excluded' ? 'strike' : ''}">${t.direction === 'debit' ? '−' : '+'}${E.sar(amt)}</div>
       ${t.currency !== 'SAR' ? `<div class="muted num">${(t.amount / 100).toFixed(2)} ${h(t.currency)}</div>` : ''}
@@ -210,7 +221,7 @@ function txDetail(id) {
   const t = state.txs.find(x => x.id === id); if (!t) return;
   const e = E.effect(state, t);
   const line = (k, v) => v ? `<div class="row"><div class="mid muted">${k}</div><div>${v}</div></div>` : '';
-  sheet(`<h3>${h(t.merchant || t.counterparty || E.catName(t.category))}</h3>
+  sheet(`<h3>${h(txName(t))}</h3>
     <div class="card">
       ${line('المبلغ', money(t.base ?? t.amount))}
       ${t.currency !== 'SAR' ? line('المبلغ الأصلي', `<span class="num">${(t.amount / 100).toFixed(2)} ${h(t.currency)}</span>`) : ''}

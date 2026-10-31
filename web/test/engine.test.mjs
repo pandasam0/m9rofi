@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as E from '../engine.js';
+import { CORPUS, userState } from './corpus.mjs';
 
 const D = s => { const [d, t = '12:00'] = s.split(' '); const [y, m, dd] = d.split('-').map(Number); const [h, mi] = t.split(':').map(Number); return E.riyadhTs(y, m, dd, h, mi); };
 const NOW = D('2026-10-28 12:00');
@@ -316,4 +317,42 @@ test('upgrade never loses transactions (empty log saved by an older build)', () 
   assert.equal(st.txs.length, 3);
   assert.equal(E.reprocess(st), true);
   assert.equal(st.txs.length, 3);
+});
+
+test('REAL CORPUS: every message the user shared is read correctly', () => {
+  const st = userState(E);
+  const now = E.riyadhTs(2026, 10, 31, 21, 0);
+  E.record(st, E.parseInbox(CORPUS.map(([, t]) => '###|sms\n' + t).join('\n')), now);
+  assert.equal(st.txs.length, 12);
+  assert.ok(st.txs.every(t => t.accountId), 'every transaction linked to an account');
+  assert.ok(st.txs.every(t => !t.review.length), 'nothing needs review');
+  const byKey = Object.fromEntries(st.txs.map(t => [E.fmtDate(t.ts) + ' ' + t.base, t]));
+  const eff = k => E.effect(st, byKey[k]).type;
+  assert.equal(eff('2026-10-31 17:05 15000'), 'internal');   // SNB → Barq top-up
+  assert.equal(eff('2026-10-31 19:24 100'), 'internal');     // Barq → SNB
+  assert.equal(eff('2026-10-31 19:26 100'), 'internal');     // SNB receives from Barq
+  assert.equal(eff('2026-10-31 19:51 100000'), 'income');    // weekly salary from Rami
+  assert.equal(byKey['2026-10-31 19:51 100000'].category, 'allowance');
+  assert.equal(byKey['2026-10-31 20:00 25000'].category, 'family');
+  assert.equal(byKey['2026-10-31 20:01 25000'].category, 'family');
+  const d360 = st.txs.filter(t => E.fmtDate(t.ts) === '2026-10-31 20:06');
+  assert.deepEqual(d360.map(t => E.effect(st, t).type).sort(), ['expense', 'internal', 'internal']);
+  const m = E.summary(st, E.period('month', now), now);
+  assert.equal(m.income, 100000);
+  assert.equal(m.spending, 87099);                           // 750 family + 89.99 APPLE + 30 Qatrat + 1 Shahrazad
+  assert.equal(m.byCategory.find(c => c.category === 'family').amount, 75000);
+  assert.equal(E.latestBalance(st, 'barq').balance, 10678);
+});
+
+test('recovery: pasting an old message re-reads a transaction saved before history existed', () => {
+  const st = userState(E);
+  const now = E.riyadhTs(2026, 10, 31, 21, 0);
+  E.ingest(st, [E.parseSMS(CORPUS[7][1], null, now)], now);  // old build: no log
+  const old = st.txs[0]; old.counterparty = null; old.mkey = null; old.category = 'transfers'; old.catSource = 'kind';
+  E.upgrade(st);
+  assert.notEqual(st.txs[0].category, 'family');
+  const r = E.record(st, [E.parseSMS(CORPUS[7][1], null, now)], now);
+  assert.equal(r.recovered, 1);
+  assert.equal(st.txs.length, 1);
+  assert.equal(st.txs[0].category, 'family');
 });
