@@ -210,3 +210,25 @@ final class RealSNBSamplesTests: XCTestCase {
         XCTAssertEqual(b.amount, 150)
     }
 }
+
+final class RealBarqTransferTests: XCTestCase {
+    func testBarqToSNBTransferIsInternal() throws {
+        var l = Fx.ledger()
+        l.state.accounts[0].accountLast4 = ["2002"]
+        l.state.accounts[1].accountLast4 = ["0032"]
+        let o = try XCTUnwrap(Fx.sms("حوالة صادرة محلية\nمبلغ1.00SAR\nرسوم0.00SAR\nلحساب2002\n2026-10-31 19:24", sender: "barqapp").record)
+        XCTAssertEqual(o.counterpartyAccountLast4, "2002")
+        XCTAssertNil(o.accountLast4)
+        let i = try XCTUnwrap(Fx.sms("حوالة واردة محلية ب SAR 1\nمن KHALIL SAMMAN 0032*\n31/10/26 19:26").record)
+        XCTAssertEqual(i.counterpartyAccountLast4, "0032")
+        let now = Fx.date("2026-10-31 20:00")
+        _ = l.ingest(records: [o, i], now: now)
+        let agg = Aggregator(state: l.state)
+        let s = agg.summary(agg.interval(.month, containing: now), now: now)
+        XCTAssertEqual(s.spending, 0)
+        XCTAssertEqual(s.incomingTransfers, 0)
+        let p = try XCTUnwrap(Fx.sms("شراء نقاط بيع\nفيزاSAR 30.00\nرصيد106.78\nلدىQatrat\n2026-10-31 18:28").record)
+        XCTAssertEqual(p.merchant, "Qatrat")
+        XCTAssertEqual(p.balanceAfter, Decimal(string: "106.78"))
+    }
+}

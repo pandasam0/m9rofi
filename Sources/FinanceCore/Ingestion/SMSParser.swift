@@ -187,8 +187,14 @@ public struct SMSParser: Sendable {
         if kind == .purchase && merchant == nil { confidence -= 0.2 }
 
         let card = Self.capture(Self.cardRegex, in: normalized)
-        let account = Self.capture(Self.accountRegex, in: normalized) ?? Self.capture(Self.accountLineRegex, in: normalized)
-        let cpAccount = Self.counterpartyAccount(in: normalized)
+        let withoutDestination = Self.toAccountRegex.stringByReplacingMatches(
+            in: normalized, range: NSRange(normalized.startIndex..., in: normalized), withTemplate: " ")
+        let account = Self.capture(Self.accountRegex, in: withoutDestination) ?? Self.capture(Self.accountLineRegex, in: normalized)
+        var cpAccount = Self.counterpartyAccount(in: normalized)
+        // SNB incoming transfer: "من KHALIL SAMMAN 0032*" → sender account last 4
+        if cpAccount == nil, kind == .transferIn { cpAccount = Self.capture(Self.incomingFromRegex, in: normalized) }
+        // Balance without currency, e.g. Barq "رصيد106.78"
+        if balance == nil, let b = Self.capture(Self.bareBalanceRegex, in: normalized) { balance = TextNormalizer.parseAmount(b) }
         let reference = Self.capture(Self.referenceRegex, in: normalized)
 
         var date = receivedAt, hasTime = true
@@ -304,6 +310,10 @@ public struct SMSParser: Sendable {
     static let referenceRegex = try! NSRegularExpression(
         pattern: #"(?:مرجع|الرقم المرجعي|رقم العملية|رقم المرجع|ref(?:erence)?(?:\s*no)?\.?)\s*[:：#]?\s*([A-Za-z0-9]{5,})"#,
         options: [.caseInsensitive])
+    /// "لحساب2002" = destination account (not the debited one).
+    static let toAccountRegex = try! NSRegularExpression(pattern: #"(?:لحساب|للحساب|إلى حساب|الى حساب|to account)\s*[:：]?\s*\*?\s*(\d{4})(?!\d)"#, options: [.caseInsensitive])
+    static let incomingFromRegex = try! NSRegularExpression(pattern: #"من\s+[^\n]*?\*?(\d{4})\*"#)
+    static let bareBalanceRegex = try! NSRegularExpression(pattern: #"(?:الرصيد|رصيد|balance)\s*[:：]?\s*(\d[\d,]*(?:\.\d{1,2})?)"#, options: [.caseInsensitive])
     static let ibanRegex = try! NSRegularExpression(pattern: #"SA\d{2}[\d\s]{18,26}"#, options: [.caseInsensitive])
 
     static func capture(_ re: NSRegularExpression, in text: String) -> String? {
@@ -319,6 +329,7 @@ public struct SMSParser: Sendable {
             let digits = text[r].filter(\.isNumber)
             return String(digits.suffix(4))
         }
+        if let to = capture(toAccountRegex, in: text) { return to }
         let lower = text.lowercased()
         for label in ["إلى", "الى", "to", "للحساب", "المستفيد"] {
             guard let range = lower.range(of: label) else { continue }
