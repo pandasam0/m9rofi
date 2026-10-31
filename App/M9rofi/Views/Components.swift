@@ -3,6 +3,8 @@ import FinanceCore
 
 /// SwiftUI also declares `Transaction`; always refer to the ledger type through this alias.
 typealias LedgerTransaction = FinanceCore.Transaction
+/// ObjectiveC also exports `Category` on Apple platforms.
+typealias Category = FinanceCore.Category
 
 enum Fmt {
     static func money(_ v: Decimal, compact: Bool = false) -> String {

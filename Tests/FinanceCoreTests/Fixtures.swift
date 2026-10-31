@@ -1,6 +1,9 @@
 import Foundation
 @testable import FinanceCore
 
+/// On Apple platforms the ObjectiveC module also exports `Category`; this alias makes ours win.
+typealias Category = FinanceCore.Category
+
 /// Synthetic messages modelled on common Saudi bank SMS structure. Real formats must be validated with
 /// the user's own (masked) messages; add them to `SMSRealSamplesTests` when available.
 enum Fx {
