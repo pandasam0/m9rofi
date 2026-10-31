@@ -225,7 +225,16 @@ function labelled(text, labels) {
 }
 
 /** Bump when parsing/matching rules change: saved message history is re-processed automatically. */
-export const PARSER_VERSION = 5;
+export const PARSER_VERSION = 6;
+
+/** Which bank wrote the message, from its format. Used when no card/account digits identify the account. */
+export function guessInstitution(text) {
+  const n = normDigits(text);
+  if (/مدى-ابل|بـ\s*SAR|^حوالة (?:صادرة|واردة) (?:داخلية|محلية) ب\s*SAR|\d{2}\/\d{2}\/\d{2}\s+\d{2}:\d{2}\s*$/m.test(n)) return 'snb';
+  if (/^فيزا\s*SAR|^لدى\S|لحساب\d{4}|^رصيد\d/m.test(n) || (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}\s*$/m.test(n) && /مبلغ\d|^فيزا/m.test(n))) return 'barq';
+  if (/في:\s*\d|^من\s*:\s*\*\d{4}|^إلى:\s*\*\d{4}|اضافة باستخدام/m.test(n)) return 'd360';
+  return null;
+}
 
 /** Parse one bank message. Returns {type:'record', rec} | {type:'balance', ...} | {type:'ignored', reason} | {type:'unparseable'}.
  *  Every outcome carries .src (the raw message) so history can be re-parsed after parser improvements. */
@@ -233,6 +242,8 @@ export function parseSMS(text, sender = null, receivedAt = Date.now(), templates
   const o = parseSMSCore(text, sender, receivedAt, templates);
   o.src = { k: 'sms', text: String(text), sender: sender || null, ts: receivedAt, ai: ai || null };
   if (o.type === 'record' && ai) o.rec.ai = ai;
+  if (o.type === 'record' && !o.rec.inst) o.rec.inst = guessInstitution(text);
+  if (o.type === 'balance' && !o.inst) o.inst = guessInstitution(text);
   return o;
 }
 
@@ -312,7 +323,7 @@ function parseSMSCore(text, sender, receivedAt, templates) {
   if (kind === 'transferIn') {
     // SNB: "من KHALIL SAMMAN 0032*" / "من9705* رامي سمان" → sender account last 4 and name
     if (!cpAcct) { const m = /من\s*[^\n]*?\*?(\d{4})\*/.exec(n); if (m) cpAcct = m[1]; }
-    if (!counterparty) { const m = /من\s*\*?\d{4}\*\s*(\p{L}[^\n]*)$/mu.exec(n); if (m) counterparty = m[1].trim(); }
+    if (!counterparty) { const m = /من\s*\*?\d{4}\*\s*(\p{L}[^\n]*)$/mu.exec(n) || /من\s+(\p{L}[\p{L} ]*?)\s+\*?\d{4}\*/u.exec(n); if (m) counterparty = m[1].trim(); }
     // D360 top-up: "بطاقة:*3098 … إلى:*9631" → credited account is 9631; the card is the (own) source.
     const to = cap(TO_LINE_RE, n);
     if (to) { acct = to; if (card) cpAcct = card; card = null; }
@@ -530,7 +541,7 @@ const KEYWORDS = [
   ['entertainment', ['cinema', 'سينما', 'game', 'games', 'ألعاب', 'العاب', 'tickets', 'تذاكر', 'ملاهي']],
   ['shopping', ['fashion', 'أزياء', 'mall', 'مول', 'electronics', 'إلكترونيات', 'store', 'متجر', 'shoes', 'أحذية', 'عطور', 'perfume']],
   ['personal', ['salon', 'صالون', 'barber', 'حلاق', 'spa', 'سبا', 'laundry']],
-  ['subscriptions', ['subscription', 'اشتراك', 'membership', 'عضوية', 'premium']],
+  ['subscriptions', ['subscription', 'اشتراك', 'membership', 'عضوية', 'premium', 'apple', 'itunes', 'app store']],
 ];
 
 export function categorize(tx, rules, settings = {}) {
@@ -578,6 +589,11 @@ function resolveAccount(state, rec) {
   }
   if (rec.hint) {
     const m = act.filter(a => a.senders.some(s => s.toLowerCase() === rec.hint.toLowerCase()));
+    if (m.length === 1) return m[0].id;
+  }
+  if (rec.inst) {
+    const names = { snb: ['snb', 'الأهلي', 'الاهلي', 'alahli', 'ncb'], barq: ['barq', 'برق'], d360: ['d360', 'd 360'] }[rec.inst] || [];
+    const m = act.filter(a => a.institution === rec.inst || names.some(n => a.name.toLowerCase().includes(n)));
     if (m.length === 1) return m[0].id;
   }
   return null;
@@ -751,7 +767,7 @@ export function ingest(state, items, now = Date.now()) {
     else if (it.type === 'ignored') { rep.ignored++; state.ignored.push({ ts: now, reason: it.reason }); }
     else if (it.type === 'unparseable') rep.unparseable++;
     else if (it.type === 'balance') {
-      const id = resolveAccount(state, { card: it.card, acct: it.acct, hint: it.hint });
+      const id = resolveAccount(state, { card: it.card, acct: it.acct, hint: it.hint, inst: it.inst });
       if (id && addBalance(state, id, it.balance, it.ts, 'sms')) rep.balances++;
     } else if (it.id && it.source) recs.push(it);
   }
@@ -798,12 +814,31 @@ export function ingest(state, items, now = Date.now()) {
 /** Ingest and remember the raw inputs. Use this instead of ingest() for new data. */
 export function record(state, items, now = Date.now()) {
   state.log ||= [];
+  // Recovery: a message that was ingested before raw text was kept, received again (e.g. pasted) →
+  // store its text and rebuild, so the old transaction is re-read with the current rules.
+  const loggedSms = new Set(state.log.filter(e => e.k === 'sms').map(e => smsSourceId(e.text)));
+  let recovered = 0;
+  for (const it of items) {
+    if (it.src?.k !== 'sms') continue;
+    const id = smsSourceId(it.src.text);
+    if (state.seen[id] && !loggedSms.has(id)) {
+      state.log = state.log.filter(e => !(e.k === 'tx' && e.tx.sources.some(x => x.id === id)));
+      state.log.push(it.src); loggedSms.add(id); recovered++;
+    }
+  }
+  if (recovered) {
+    items = items.filter(it => !(it.src?.k === 'sms' && loggedSms.has(smsSourceId(it.src.text)) && state.seen[smsSourceId(it.src.text)]));
+    rebuild(state, now);
+    refreshCategories(state);
+  }
   for (const it of items) {
     if (it.src) state.log.push(it.src);
     else if (it.type === 'record') state.log.push({ k: 'rec', rec: it.rec });
     else if (it.id && it.source) state.log.push({ k: 'rec', rec: it });
   }
-  return ingest(state, items, now);
+  const rep = ingest(state, items, now);
+  rep.recovered = recovered;
+  return rep;
 }
 
 function applyOp(state, t, op) {
