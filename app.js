@@ -12,12 +12,30 @@ async function load() {
   return new Promise(ok => { const q = db.transaction(STORE).objectStore(STORE).get('state'); q.onsuccess = () => ok(q.result || null); q.onerror = () => ok(null); });
 }
 async function save() {
+  if (HOST) { window.__M9OUT__ = JSON.stringify(state); return; }
   const db = await idb();
   return new Promise(ok => { const t = db.transaction(STORE, 'readwrite'); t.objectStore(STORE).put(state, 'state'); t.oncomplete = ok; t.onerror = ok; });
 }
 
 let state = E.newState();
 let notices = [];
+
+// ───────────── Host bridge ─────────────
+// When running inside the Scriptable app, the host injects window.__M9HOST__ and polls window.__M9OUT__ / __M9REQ__.
+const HOST = window.__M9HOST__ || null;
+let reqSeq = 0;
+const pending = {};
+function hostRequest(req) {
+  return new Promise(ok => { const id = ++reqSeq; pending[id] = ok; (window.__M9REQ__ ||= []).push({ id, ...req }); });
+}
+window.__m9reply = (id, value) => { const f = pending[id]; delete pending[id]; if (f) f(value); };
+window.__m9ingest = async text => {
+  const items = E.parseInbox(text, state.templates);
+  if (!items.length) return 0;
+  const r = E.ingest(state, items, now());
+  await commit(r);
+  return r.added.length;
+};
 
 // ───────────── Helpers ─────────────
 const $ = s => document.querySelector(s);
@@ -47,7 +65,18 @@ function sheet(html) { $('#sheet-body').innerHTML = html; $('#sheet').hidden = f
 function closeSheet() { $('#sheet').hidden = true; $('#sheet-body').innerHTML = ''; }
 $('#sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeSheet(); });
 
+async function askYesNo(msg) {
+  if (!HOST) return confirm(msg);
+  return new Promise(ok => {
+    sheet(`<h3>${h(msg)}</h3><button class="wide danger" id="yes">نعم</button><button class="wide ghost" id="no">إلغاء</button>`);
+    $('#yes').onclick = () => { closeSheet(); ok(true); };
+    $('#no').onclick = () => { closeSheet(); ok(false); };
+  });
+}
+function tell(msg) { if (HOST) { sheet(`<p>${h(msg)}</p><button class="wide" id="ok">تم</button>`); $('#ok').onclick = closeSheet; } else alert(msg); }
+
 function pickFile(accept) {
+  if (HOST) return hostRequest({ type: 'pick' }).then(text => (text == null ? null : { text: async () => text }));
   return new Promise(ok => {
     const f = $('#file'); f.value = ''; f.accept = accept;
     f.onchange = () => ok(f.files[0] || null); f.click();
@@ -94,7 +123,7 @@ function setTitle(t, actions = '') { $('#title').textContent = t; $('#actions').
 
 // Home
 function home() {
-  setTitle('مصروفي', `<button class="small" id="sync">⟳ تحديث</button><button class="small ghost" id="add">＋</button>`);
+  setTitle('مصروفي', HOST ? `<span class="badge">تلقائي ✓</span><button class="small ghost" id="add">＋</button>` : `<button class="small" id="sync">⟳ تحديث</button><button class="small ghost" id="add">＋</button>`);
   const d = E.dashboard(state, now());
   const budgets = E.budgetStatus(state, now());
   const rec = E.recurring(state, now());
@@ -130,7 +159,7 @@ function home() {
   const recent = [...state.txs].sort((a, b) => b.ts - a.ts).slice(0, 5);
   if (recent.length) html += `<div class="card"><h3>آخر العمليات</h3>${recent.map(txRow).join('')}</div>`;
   $('#view').innerHTML = html;
-  $('#sync').onclick = syncInbox;
+  if ($('#sync')) $('#sync').onclick = syncInbox;
   $('#add').onclick = addTx;
 }
 
@@ -204,7 +233,7 @@ function txDetail(id) {
   $('#save').onclick = async () => { E.recategorize(state, id, $('#c').value, $('#learn').checked); closeSheet(); await commit(); };
   $('#ex').onclick = async () => { t.excluded = !t.excluded; closeSheet(); await commit(); };
   if ($('#int')) $('#int').onclick = async () => { E.resolve(state, id, 'internal'); closeSheet(); await commit(); };
-  $('#del').onclick = async () => { if (confirm('حذف العملية؟')) { E.deleteTx(state, id); closeSheet(); await commit(); } };
+  $('#del').onclick = async () => { if (await askYesNo('حذف العملية؟')) { E.deleteTx(state, id); closeSheet(); await commit(); } };
   if ($('#fix')) $('#fix').onclick = () => reviewDetail(id);
 }
 
@@ -326,10 +355,11 @@ function reports() {
   const shift = n => { const [a, b] = E.period(rp.kind, rp.anchor); rp.anchor = n < 0 ? a - 1 : b + 1; reports(); };
   $('#prev').onclick = () => shift(-1); $('#next').onclick = () => shift(1);
   $('#csv').onclick = () => download(`m9rofi-${E.fmtDate(iv[0], false)}.csv`, E.exportCSV(state, iv), 'text/csv;charset=utf-8');
-  $('#pdf').onclick = () => window.print();
+  if (HOST) $('#pdf').remove(); else $('#pdf').onclick = () => window.print();
 }
 
 function download(name, content, type) {
+  if (HOST) { hostRequest({ type: 'share', name, content }); return; }
   const url = URL.createObjectURL(new Blob([content], { type }));
   const a = document.createElement('a'); a.href = url; a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
@@ -391,7 +421,7 @@ function editAccount(a) {
     if (nb != null && (!bal || nb !== bal.balance)) state.balances.push({ accountId: a.id, balance: nb, ts: now(), source: 'manual' });
     closeSheet(); await commit();
   };
-  if ($('#arch')) $('#arch').onclick = async () => { if (confirm('حذف الحساب؟ العمليات المسجلة تبقى.')) { a.archived = true; closeSheet(); await commit(); } };
+  if ($('#arch')) $('#arch').onclick = async () => { if (await askYesNo('حذف الحساب؟ العمليات المسجلة تبقى.')) { a.archived = true; closeSheet(); await commit(); } };
 }
 
 function budgets() {
@@ -462,9 +492,9 @@ function settings() {
     s.ownerNames = $('#own').value.split(/[,،]/).map(x => x.trim()).filter(Boolean); await commit(); };
   $('#bk').onclick = () => download(`m9rofi-backup-${E.fmtDate(now(), false)}.json`, JSON.stringify(state), 'application/json');
   $('#rs').onclick = async () => { const f = await pickFile('.json,application/json'); if (!f) return;
-    try { const d = JSON.parse(await f.text()); if (!Array.isArray(d.txs)) throw 0; if (confirm('استبدال البيانات الحالية بالنسخة الاحتياطية؟')) { state = { ...E.newState(), ...d }; await commit(); } }
-    catch { alert('ملف غير صالح'); } };
-  $('#wipe').onclick = async () => { if (confirm('حذف كل العمليات والحسابات والميزانيات نهائياً؟') && confirm('متأكد؟ لا يمكن التراجع.')) { state = E.newState(); notices = []; await commit(); } };
+    try { const d = JSON.parse(await f.text()); if (!Array.isArray(d.txs)) throw 0; if (await askYesNo('استبدال البيانات الحالية بالنسخة الاحتياطية؟')) { state = { ...E.newState(), ...d }; await commit(); } }
+    catch { tell('ملف غير صالح'); } };
+  $('#wipe').onclick = async () => { if (await askYesNo('حذف كل العمليات والحسابات والميزانيات نهائياً؟') && await askYesNo('متأكد؟ لا يمكن التراجع.')) { state = E.newState(); notices = []; await commit(); } };
 }
 
 function guide() {
@@ -486,8 +516,8 @@ function guide() {
 
 // ───────────── Boot ─────────────
 (async () => {
-  try { const s = await load(); if (s) state = { ...E.newState(), ...s, settings: { ...E.newState().settings, ...s.settings } }; } catch { /* first run */ }
-  if (navigator.storage?.persist) navigator.storage.persist();
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  try { const s = HOST ? HOST.state : await load(); if (s) state = { ...E.newState(), ...s, settings: { ...E.newState().settings, ...s.settings } }; } catch { /* first run */ }
+  if (!HOST && navigator.storage?.persist) navigator.storage.persist();
+  if (!HOST && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   render();
 })();
