@@ -371,7 +371,25 @@ function more() {
   setTitle('المزيد');
   const links = [['guide', '📖', 'خطوات الإعداد'], ['accounts', '🏦', 'الحسابات'], ['budgets', '🎯', 'الميزانيات'], ['subs', '🔁', 'الاشتراكات'],
     ['review', '⚠️', 'قائمة المراجعة'], ['importView', '📥', 'استيراد كشف أو رسائل'], ['alertsView', '🔔', 'التنبيهات'], ['settings', '🔒', 'الإعدادات والخصوصية']];
-  $('#view').innerHTML = `<div class="card">${links.map(([r, i, t]) => `<a href="#${r}" class="row" style="color:inherit;text-decoration:none"><div class="ic">${i}</div><div class="mid">${t}</div><span class="muted">‹</span></a>`).join('')}</div>`;
+  $('#view').innerHTML = `<div class="card">${links.map(([r, i, t]) => `<a href="#${r}" class="row" style="color:inherit;text-decoration:none"><div class="ic">${i}</div><div class="mid">${t}</div><span class="muted">‹</span></a>`).join('')}</div>
+    <div class="card"><a class="row" id="upd" style="color:inherit;text-decoration:none"><div class="ic">🔄</div><div class="mid">تحديث التطبيق<div class="muted">الإصدار: ${h(versionText())}</div></div></a>
+    <a class="row" id="rep" style="color:inherit;text-decoration:none"><div class="ic">🧠</div><div class="mid">إعادة فحص كل العمليات<div class="muted">يعيد قراءة الرسائل المحفوظة بأحدث القواعد</div></div></a></div>`;
+  $('#upd').onclick = updateApp;
+  $('#rep').onclick = async () => { const before = state.txs.length; const ok = E.reprocess(state); await commit();
+    tell(ok ? `تم فحص ${state.txs.length} عملية.` : `لم يتم التغيير (حماية من فقدان البيانات). العمليات: ${before}`); };
+}
+
+function versionText() { return `${HOST?.build || 'web'} · قواعد ${E.PARSER_VERSION}`; }
+
+async function updateApp() {
+  if (HOST) {
+    sheet('<p>جاري التحقق من التحديث…</p>');
+    const r = await hostRequest({ type: 'update' });
+    if (!r || r.error) return tell('تعذر التحديث. تأكد من الإنترنت وحاول مرة ثانية.');
+    return tell(r.changed ? `تم تنزيل التحديث (${r.build}). اضغط Close ثم افتح مصروفي من جديد.` : `عندك آخر إصدار (${r.build}).`);
+  }
+  try { const reg = await navigator.serviceWorker?.getRegistration(); await reg?.update(); } catch {}
+  location.reload();
 }
 
 function alertsView() {
