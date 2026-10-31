@@ -198,3 +198,30 @@ test('real Barq ↔ SNB transfer is internal', () => {
   const p = E.parseSMS('شراء نقاط بيع\nفيزاSAR 30.00\nرصيد106.78\nلدىQatrat\n2026-10-31 18:28', null, 0).rec;
   assert.deepEqual([p.kind, p.amount, p.merchant, p.balance], ['purchase', 3000, 'Qatrat', 10678]);
 });
+
+test('real weekly allowance: SNB + D360 (Oct 31)', () => {
+  const st = L();
+  st.accounts[0].numbers = ['2002']; st.accounts[0].cards = ['3098'];
+  st.accounts[1].numbers = ['0032'];
+  st.accounts[2].numbers = ['9631'];
+  const msgs = [
+    'حوالة واردة داخلية بSAR 1000\nمن9705* رامي سمان\n31/10/26 19:51',
+    'حوالة صادرة داخلية بSAR 250\nل2405* رناد سمان\n31/10/26 20:00',
+    'حوالة صادرة داخلية بSAR 250\nل6602* عبدالقادر سمان\n31/10/26 20:01',
+    'شراء انترنت\nبـSAR 250\nمن 2002*\nمن MYSR D360\nمدى-ابل *3098\nفي 20:06 31/10/26',
+    'اضافة باستخدام آبل باى\nمبلغ:SAR 250\nبطاقة:*3098 - mada\nإلى:*9631\nفي:20:06:23 31/10/2026',
+    'حوالة صادرة داخلية\nمن : *9631\nمبلغ: SAR 250.00\nإلى: ELHAM SAMMAN\nرقم الحساب: *0529\nفي: 31-10-2026 20:06',
+  ];
+  const p = msgs.map(m => E.parseSMS(m, null, 0));
+  assert.equal(p[0].rec.counterparty, 'رامي سمان');
+  assert.equal(p[1].rec.counterparty, 'رناد سمان');
+  assert.deepEqual([p[4].rec.kind, p[4].rec.direction, p[4].rec.acct, p[4].rec.cpAcct], ['transferIn', 'credit', '9631', '3098']);
+  assert.deepEqual([p[5].rec.kind, p[5].rec.acct, p[5].rec.cpAcct, p[5].rec.counterparty], ['transferOut', '9631', '0529', 'ELHAM SAMMAN']);
+  E.ingest(st, p, NOW);
+  const m = month(st);
+  assert.equal(m.spending, 75000);                 // 3 × 250 to siblings
+  assert.equal(m.byCategory[0].category, 'transfers');
+  assert.equal(m.transfersIn, 100000);             // 1000 from Rami: not income
+  assert.equal(m.income, 0);
+  assert.equal(m.internalCount, 2);                // SNB → D360 top-up legs
+});
