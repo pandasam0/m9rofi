@@ -225,7 +225,7 @@ function labelled(text, labels) {
 }
 
 /** Bump when parsing/matching rules change: saved message history is re-processed automatically. */
-export const PARSER_VERSION = 3;
+export const PARSER_VERSION = 4;
 
 /** Parse one bank message. Returns {type:'record', rec} | {type:'balance', ...} | {type:'ignored', reason} | {type:'unparseable'}.
  *  Every outcome carries .src (the raw message) so history can be re-parsed after parser improvements. */
@@ -697,7 +697,7 @@ const INST_NAMES = { snb: ['snb', 'alahli', 'الأهلي', 'الاهلي', 'ncb
 function isWalletTopup(state, t) {
   if (t.kind !== 'purchase' || t.direction !== 'debit' || !t.merchant) return false;
   const raw = normDigits(t.merchant).toLowerCase();
-  return state.accounts.some(a => !a.archived && a.id !== t.accountId && (a.type === 'wallet' || ['barq', 'd360'].includes(a.institution))
+  return state.accounts.some(a => !a.archived && a.id !== t.accountId && a.type !== 'cash' && a.type !== 'creditCard'
     && [a.name.toLowerCase(), ...(INST_NAMES[a.institution] || [])].some(n => n && n.length >= 3 && new RegExp(`(^|[^\\p{L}\\d])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\d])`, 'u').test(raw)));
 }
 

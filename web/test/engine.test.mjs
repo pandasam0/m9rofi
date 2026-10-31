@@ -254,7 +254,7 @@ test('non-family transfer is not spending unless the user categorises it', () =>
 
 test('self-healing: legacy wrong D360 entries are fixed automatically on upgrade', () => {
   const st = L(); st.settings.ownerNames = ['خليل سمان', 'KHALIL SAMMAN'];
-  st.accounts[0].numbers = ['2002']; st.accounts[0].cards = ['3098']; st.accounts[2].numbers = ['9631']; st.accounts[2].type = 'wallet';
+  st.accounts[0].numbers = ['2002']; st.accounts[0].cards = ['3098']; st.accounts[2].numbers = ['9631']; st.accounts[2].institution = 'other'; st.accounts[2].type = 'current';
   const base = { currency: 'SAR', direction: 'debit', status: 'completed', hasTime: true, card: '3098', accountId: 'snb-0001', internal: false, link: null,
     review: [], excluded: false, created: 0, catConf: 0, counterparty: null, acct: null, cpAcct: null, ref: null, note: null };
   delete st.parserVersion; delete st.log;
