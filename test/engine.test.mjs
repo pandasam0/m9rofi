@@ -176,3 +176,10 @@ test('history: recurring, budgets, assistant', () => {
   assert.equal(E.parseQuestion(s, 'كم دفعت على الاشتراكات؟').category, 'subscriptions');
   assert.ok(E.exportCSV(s, E.period('month', NOW)).startsWith('﻿التاريخ'));
 });
+
+test('real SNB formats (Oct 2026)', () => {
+  const a = E.parseSMS('شراء-POS\nبـSAR 1\nمن Shahrazad\nمدى-ابل*3098\nفي 19:13 31/10/26', 'SNB-AlAhli', 0).rec;
+  assert.deepEqual([a.kind, a.amount, a.merchant, a.card, a.ts], ['purchase', 100, 'Shahrazad', '3098', D('2026-10-31 19:13')]);
+  const b = E.parseSMS('شراء انترنت\nبـSAR 150\nمن 2002*\nمن barq\nمدى-ابل *3098\nفي 17:05 31/10/26', 'SNB-AlAhli', 0).rec;
+  assert.deepEqual([b.kind, b.amount, b.merchant, b.card, b.acct], ['purchase', 15000, 'barq', '3098', '2002']);
+});

@@ -1,5 +1,5 @@
 // Offline cache. Bump VERSION on every release so phones pick up the update.
-const VERSION = 'm9rofi-v1';
+const VERSION = 'm9rofi-v2';
 const FILES = ['./', 'index.html', 'app.js', 'engine.js', 'style.css', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener('activate', e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== VERSION).map(k => caches.delete(k)))).then(() => self.clients.claim())));
