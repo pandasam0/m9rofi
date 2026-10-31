@@ -84,8 +84,8 @@ test('internal transfer SNB → Barq is not spending', () => {
   assert.deepEqual([m.spending, m.income, m.transfersIn, m.internalCount], [0, 0, 0, 2]);
 });
 
-test('external transfer is spending; incoming is not income', () => {
-  const s = L();
+test('external transfer is spending when enabled; incoming is not income', () => {
+  const s = L(); s.settings.externalTransfersAsSpending = true;
   E.ingest(s, [{ source: 'sms', id: 'o', amount: 25000, currency: 'SAR', direction: 'debit', kind: 'transferOut', ts: D('2026-10-12 09:00'), hasTime: true, counterparty: 'Ahmed', accountId: 'snb-0001' },
     { source: 'sms', id: 'i', amount: 40000, currency: 'SAR', direction: 'credit', kind: 'transferIn', ts: D('2026-10-13 09:00'), hasTime: true, counterparty: 'Khalid', accountId: 'snb-0001' }], NOW);
   const m = month(s);
@@ -219,9 +219,9 @@ test('real weekly allowance: SNB + D360 (Oct 31)', () => {
   assert.deepEqual([p[5].rec.kind, p[5].rec.acct, p[5].rec.cpAcct, p[5].rec.counterparty], ['transferOut', '9631', '0529', 'ELHAM SAMMAN']);
   E.ingest(st, p, NOW);
   const m = month(st);
-  assert.equal(m.spending, 75000);                 // 3 × 250 to siblings
-  assert.equal(m.byCategory[0].category, 'transfers');
-  assert.equal(m.transfersIn, 100000);             // without owner name: 1000 from Rami is an incoming transfer, not income
+  assert.equal(m.spending, 0);                     // without owner name: transfers to people are not spending by default
+  assert.equal(m.transfersOut, 75000);
+  assert.equal(m.transfersIn, 100000);             // 1000 from Rami is an incoming transfer, not income
   assert.equal(m.income, 0);
   // With the owner's name, family transfers are recognised automatically.
   st.settings.ownerNames = ['خليل سمان', 'KHALIL SAMMAN'];
@@ -236,4 +236,18 @@ test('real weekly allowance: SNB + D360 (Oct 31)', () => {
   assert.equal(E.relation('رامي سمان', st.settings.ownerNames), 'family');
   assert.equal(E.relation('Ahmed Ali', st.settings.ownerNames), null);
   assert.equal(m.internalCount, 2);                // SNB → D360 top-up legs
+});
+
+test('non-family transfer is not spending unless the user categorises it', () => {
+  const st = L(); st.settings.ownerNames = ['خليل سمان', 'KHALIL SAMMAN'];
+  E.ingest(st, [E.parseSMS('حوالة صادرة داخلية بSAR 300\nل1111* احمد علي\n31/10/26 20:00', null, 0),
+                E.parseSMS('حوالة صادرة داخلية بSAR 250\nل2405* رناد سمان\n31/10/26 20:05', null, 0)], NOW);
+  let m = month(st);
+  assert.deepEqual([m.spending, m.transfersOut], [25000, 30000]);
+  const ahmed = st.txs.find(t => t.counterparty === 'احمد علي');
+  E.recategorize(st, ahmed.id, 'transfers', true);
+  m = month(st);
+  assert.deepEqual([m.spending, m.transfersOut], [55000, 0]);
+  const old = E.newState(); old.settings = { externalTransfersAsSpending: true };
+  assert.equal(E.migrate(old), true); assert.equal(old.settings.externalTransfersAsSpending, false);
 });

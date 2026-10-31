@@ -46,8 +46,8 @@ const now = () => Date.now();
 const acct = id => state.accounts.find(a => a.id === id);
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2));
 const EFFECT_AR = { expense: 'مصروف', refund: 'مسترد (يُخصم من المصروفات)', income: 'دخل', transferIn: 'تحويل وارد (ليس دخلاً)',
-  cash: 'سحب نقدي (ليس مصروفاً)', internal: 'تحويل داخلي (غير محتسب)', pending: 'معلقة (غير محتسبة)', unconfirmed: 'قيد المراجعة (غير محتسبة)', excluded: 'مستبعدة' };
-const BADGE = { internal: 'تحويل داخلي', pending: 'معلقة', unconfirmed: 'مراجعة', excluded: 'مستبعدة', cash: 'سحب نقدي', transferIn: 'تحويل وارد', refund: 'مسترد' };
+  cash: 'سحب نقدي (ليس مصروفاً)', transferOut: 'تحويل لشخص خارج العائلة (غير محتسب). غيّر التصنيف لاحتسابه', internal: 'تحويل داخلي (غير محتسب)', pending: 'معلقة (غير محتسبة)', unconfirmed: 'قيد المراجعة (غير محتسبة)', excluded: 'مستبعدة' };
+const BADGE = { transferOut: 'تحويل غير محتسب', internal: 'تحويل داخلي', pending: 'معلقة', unconfirmed: 'مراجعة', excluded: 'مستبعدة', cash: 'سحب نقدي', transferIn: 'تحويل وارد', refund: 'مسترد' };
 const STATUS_AR = { pending: 'معلقة', completed: 'مكتملة', reversed: 'ملغاة', refunded: 'مستردة' };
 const SRC_AR = { sms: 'رسالة بنك', wallet: 'Apple Pay', statement: 'كشف حساب', manual: 'يدوي', email: 'بريد' };
 
@@ -340,6 +340,7 @@ function reports() {
       <div class="stat"><small>مصروفات ثابتة</small><b>${money(fixed)}</b></div>
       <div class="stat"><small>مصروفات متغيرة</small><b>${money(variable)}</b></div>
       <div class="stat"><small>تحويلات واردة</small><b>${money(s.transfersIn)}</b></div>
+      <div class="stat"><small>تحويلات صادرة غير محتسبة</small><b>${money(s.transfersOut)}</b></div>
       <div class="stat"><small>سحب نقدي</small><b>${money(s.cash)}</b></div>
     </div>
     <div class="card"><h3>توزيع المصروفات</h3>${s.byCategory.filter(c => c.amount > 0).map(c => `
@@ -480,7 +481,7 @@ function settings() {
   setTitle('الإعدادات');
   const s = state.settings;
   $('#view').innerHTML = `<div class="card"><h3>قواعد الاحتساب</h3>
-      <label><input type="checkbox" id="ext" style="width:auto" ${s.externalTransfersAsSpending ? 'checked' : ''}> احتساب التحويل لأشخاص آخرين كمصروف</label><br>
+      <label><input type="checkbox" id="ext" style="width:auto" ${s.externalTransfersAsSpending ? 'checked' : ''}> احتساب كل التحويلات لأشخاص خارج العائلة كمصروف</label><br>
       <label><input type="checkbox" id="cash" style="width:auto" ${s.cashAsSpending ? 'checked' : ''}> احتساب السحب النقدي كمصروف</label>
       <label>اسمك كما يظهر في التحويلات، بالعربي والإنجليزي (مثال: خليل سمان, KHALIL SAMMAN). يُستخدم لكشف التحويل لنفسك ولتصنيف تحويلات العائلة تلقائياً.</label><input id="own" value="${h(s.ownerNames.join(', '))}">
       <button class="wide" id="save">حفظ</button></div>
@@ -516,7 +517,7 @@ function guide() {
 
 // ───────────── Boot ─────────────
 (async () => {
-  try { const s = HOST ? HOST.state : await load(); if (s) { state = { ...E.newState(), ...s, settings: { ...E.newState().settings, ...s.settings } }; if (E.refreshCategories(state)) await save(); } } catch { /* first run */ }
+  try { const s = HOST ? HOST.state : await load(); if (s) { state = { ...E.newState(), ...s, settings: { ...E.newState().settings, ...s.settings } }; const m = E.migrate(state); if (E.refreshCategories(state) || m) await save(); } } catch { /* first run */ }
   if (!HOST && navigator.storage?.persist) navigator.storage.persist();
   if (!HOST && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   render();
