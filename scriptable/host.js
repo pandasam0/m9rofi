@@ -121,7 +121,7 @@ async function runApp() {
   async function drainQueue() {
     const q = (await read(QUEUE)) || '';
     if (!q.trim()) return;
-    await wv.evaluateJavaScript(`window.__m9ingest(${safe(q)}).then(n => completion(n)).catch(e => completion(-1))`, true);
+    await wv.evaluateJavaScript(`window.__m9ingest(${safe(q)}).then(n => completion(n)).catch(e => completion(-1)); 0`, true);
     await flush();
     const cur = (await read(QUEUE)) || '';
     fm.writeString(QUEUE, cur.startsWith(q) ? cur.slice(q.length) : cur);
@@ -130,11 +130,11 @@ async function runApp() {
     if (req.type === 'pick') {
       let text = null;
       try { const paths = await DocumentPicker.open(); if (paths && paths[0]) text = FileManager.local().readString(paths[0]); } catch (e) {}
-      await wv.evaluateJavaScript(`window.__m9reply(${req.id}, ${safe(text)})`, false);
+      await wv.evaluateJavaScript(`window.__m9reply(${req.id}, ${safe(text)}); 0`, false);
     } else if (req.type === 'share') {
       // Save the file via the iOS Files picker (CSV report or JSON backup).
       try { await DocumentPicker.exportString(req.content, req.name); } catch (e) {}
-      await wv.evaluateJavaScript(`window.__m9reply(${req.id}, true)`, false);
+      await wv.evaluateJavaScript(`window.__m9reply(${req.id}, true); 0`, false);
     }
   }
 
