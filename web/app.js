@@ -482,14 +482,14 @@ function settings() {
   $('#view').innerHTML = `<div class="card"><h3>قواعد الاحتساب</h3>
       <label><input type="checkbox" id="ext" style="width:auto" ${s.externalTransfersAsSpending ? 'checked' : ''}> احتساب التحويل لأشخاص آخرين كمصروف</label><br>
       <label><input type="checkbox" id="cash" style="width:auto" ${s.cashAsSpending ? 'checked' : ''}> احتساب السحب النقدي كمصروف</label>
-      <label>اسمك كما يظهر في التحويلات (لكشف التحويل لنفسك)</label><input id="own" value="${h(s.ownerNames.join(', '))}">
+      <label>اسمك كما يظهر في التحويلات، بالعربي والإنجليزي (مثال: خليل سمان, KHALIL SAMMAN). يُستخدم لكشف التحويل لنفسك ولتصنيف تحويلات العائلة تلقائياً.</label><input id="own" value="${h(s.ownerNames.join(', '))}">
       <button class="wide" id="save">حفظ</button></div>
     <div class="card"><h3>الخصوصية</h3><p class="muted">بياناتك محفوظة في هذا الجهاز فقط داخل Safari. لا تُرسل لأي خادم. حذف التطبيق من الشاشة الرئيسية أو مسح بيانات Safari يحذفها، لذلك صدّر نسخة احتياطية بانتظام.</p>
       <button class="wide ghost" id="bk">تصدير نسخة احتياطية</button><button class="wide ghost" id="rs">استعادة نسخة احتياطية</button>
       <button class="wide danger" id="wipe">حذف جميع البيانات</button></div>
     <p class="muted">عدد العمليات: ${state.txs.length} · الحسابات: ${state.accounts.length}</p>`;
   $('#save').onclick = async () => { s.externalTransfersAsSpending = $('#ext').checked; s.cashAsSpending = $('#cash').checked;
-    s.ownerNames = $('#own').value.split(/[,،]/).map(x => x.trim()).filter(Boolean); await commit(); };
+    s.ownerNames = $('#own').value.split(/[,،]/).map(x => x.trim()).filter(Boolean); E.refreshCategories(state); await commit(); tell('تم الحفظ'); };
   $('#bk').onclick = () => download(`m9rofi-backup-${E.fmtDate(now(), false)}.json`, JSON.stringify(state), 'application/json');
   $('#rs').onclick = async () => { const f = await pickFile('.json,application/json'); if (!f) return;
     try { const d = JSON.parse(await f.text()); if (!Array.isArray(d.txs)) throw 0; if (await askYesNo('استبدال البيانات الحالية بالنسخة الاحتياطية؟')) { state = { ...E.newState(), ...d }; await commit(); } }
@@ -516,7 +516,7 @@ function guide() {
 
 // ───────────── Boot ─────────────
 (async () => {
-  try { const s = HOST ? HOST.state : await load(); if (s) state = { ...E.newState(), ...s, settings: { ...E.newState().settings, ...s.settings } }; } catch { /* first run */ }
+  try { const s = HOST ? HOST.state : await load(); if (s) { state = { ...E.newState(), ...s, settings: { ...E.newState().settings, ...s.settings } }; if (E.refreshCategories(state)) await save(); } } catch { /* first run */ }
   if (!HOST && navigator.storage?.persist) navigator.storage.persist();
   if (!HOST && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   render();
