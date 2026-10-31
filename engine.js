@@ -224,8 +224,19 @@ function labelled(text, labels) {
   return null;
 }
 
-/** Parse one bank message. Returns {type:'record', rec} | {type:'balance', ...} | {type:'ignored', reason} | {type:'unparseable'} */
-export function parseSMS(text, sender = null, receivedAt = Date.now(), templates = []) {
+/** Bump when parsing/matching rules change: saved message history is re-processed automatically. */
+export const PARSER_VERSION = 3;
+
+/** Parse one bank message. Returns {type:'record', rec} | {type:'balance', ...} | {type:'ignored', reason} | {type:'unparseable'}.
+ *  Every outcome carries .src (the raw message) so history can be re-parsed after parser improvements. */
+export function parseSMS(text, sender = null, receivedAt = Date.now(), templates = [], ai = null) {
+  const o = parseSMSCore(text, sender, receivedAt, templates);
+  o.src = { k: 'sms', text: String(text), sender: sender || null, ts: receivedAt, ai: ai || null };
+  if (o.type === 'record' && ai) o.rec.ai = ai;
+  return o;
+}
+
+function parseSMSCore(text, sender, receivedAt, templates) {
   const n = normDigits(text);
   const lower = n.toLowerCase();
   if (!/\d/.test(lower)) return { type: 'ignored', reason: 'no numbers' };
@@ -339,9 +350,29 @@ export function parseInbox(text, templates = []) {
     const body = nl < 0 ? '' : b.slice(nl + 1).trim();
     const ts = Date.parse(head[1]) || Date.now();
     if (head[0] === 'pay') out.push({ type: 'record', rec: walletRecord(head[3], head[4] || body, head[2], ts) });
-    else if (head[0] === 'sms' && body) out.push(parseSMS(body, head[2] || null, ts, templates));
+    else if (head[0] === 'sms' && body) {
+      // Optional line "@ai: <category>" added by the Shortcuts "Use Model" action (Apple Intelligence).
+      let ai = null;
+      const clean = body.split('\n').filter(l => { const m = /^\s*@ai\s*:?\s*(.*)$/i.exec(l); if (m) { ai = aiCategory(m[1]); return false; } return true; }).join('\n').trim();
+      if (clean) out.push(parseSMS(clean, head[2] || null, ts, templates, ai));
+    }
   }
   return out;
+}
+
+/** Map a model answer ("coffee", "القهوة", "Coffee.") to a category key, or null. */
+export function aiCategory(answer) {
+  const a = normDigits(answer || '').toLowerCase().replace(/[^\p{L}\s]/gu, ' ').trim();
+  if (!a) return null;
+  for (const c of EXPENSE_CATEGORIES) if (a.split(/\s+/).includes(c.toLowerCase())) return c;
+  const syn = { restaurant: 'dining', food: 'dining', مطعم: 'dining', مطاعم: 'dining', قهوة: 'coffee', قهوه: 'coffee', cafe: 'coffee',
+    grocery: 'groceries', supermarket: 'groceries', بقالة: 'groceries', تسوق: 'shopping', ملابس: 'shopping', fuel: 'auto', car: 'auto', بنزين: 'auto',
+    taxi: 'transport', مواصلات: 'transport', subscription: 'subscriptions', اشتراك: 'subscriptions', اشتراكات: 'subscriptions',
+    games: 'entertainment', ترفيه: 'entertainment', hotel: 'travel', سفر: 'travel', pharmacy: 'health', صحة: 'health', gym: 'health',
+    bill: 'bills', utilities: 'bills', فواتير: 'bills', salon: 'personal', شخصية: 'personal', أخرى: 'other', اخرى: 'other' };
+  for (const w of a.split(/\s+/)) if (syn[w]) return syn[w];
+  for (const c of EXPENSE_CATEGORIES) if (a.includes(catName(c).replace(/^ال/, ''))) return c;
+  return null;
 }
 
 // ───────────────────────── CSV statements ─────────────────────────
@@ -529,7 +560,7 @@ export function categorize(tx, rules, settings = {}) {
 
 // ───────────────────────── Ledger ─────────────────────────
 export function newState() {
-  return { v: 1, accounts: [], txs: [], balances: [], budgets: {}, rules: {}, seen: {}, templates: [], ignored: [],
+  return { v: 1, parserVersion: PARSER_VERSION, log: [], ops: [], accounts: [], txs: [], balances: [], budgets: {}, rules: {}, seen: {}, templates: [], ignored: [],
     settings: { externalTransfersAsSpending: false, cashAsSpending: false, ownerNames: [], rulesVersion: 2 }, fired: {} };
 }
 
@@ -573,7 +604,7 @@ function makeTx(state, r, now) {
     merchant: r.merchant || null, mkey: (r.merchant || r.counterparty) ? merchantKey(r.merchant || r.counterparty) : null,
     counterparty: r.counterparty || null, accountId: resolveAccount(state, r), card: r.card || null, acct: r.acct || null,
     cpAcct: r.cpAcct || null, ref: r.ref || null, note: r.note || null, sources: [{ type: r.source, id: r.id, at: now }],
-    category: 'other', catSource: 'none', catConf: 0, internal: false, link: null, review, excluded: false, created: now };
+    category: 'other', catSource: 'none', catConf: 0, internal: false, link: null, review, excluded: false, created: now, ai: r.ai || null };
   if (r.category) { tx.category = r.category; tx.catSource = 'user'; tx.catConf = 1; }
   return tx;
 }
@@ -636,7 +667,10 @@ function merge(state, inc, i) {
 }
 
 function applyCategory(state, t) {
-  const d = categorize(t, state.rules, state.settings);
+  let d = categorize(t, state.rules, state.settings);
+  if (t.ai && d.confidence < 0.8 && t.direction === 'debit' && !t.internal && isExpenseCat(t.ai)
+      && !['transferOut', 'transferIn', 'cashWithdrawal', 'cardPayment', 'fee'].includes(t.kind))
+    d = { category: t.ai, source: 'ai', confidence: 0.7 };
   t.category = d.category; t.catSource = d.source; t.catConf = d.confidence;
 }
 
@@ -658,6 +692,14 @@ function findRefundTarget(state, tx) {
 }
 
 const INST_NAMES = { snb: ['snb', 'alahli', 'الأهلي', 'الاهلي', 'ncb'], barq: ['barq', 'برق'], d360: ['d360', 'd 360'] };
+
+/** Card purchase whose merchant is one of the user's own wallets/banks (e.g. "MYSR D360", "barq"). */
+function isWalletTopup(state, t) {
+  if (t.kind !== 'purchase' || t.direction !== 'debit' || !t.merchant) return false;
+  const raw = normDigits(t.merchant).toLowerCase();
+  return state.accounts.some(a => !a.archived && a.id !== t.accountId && (a.type === 'wallet' || ['barq', 'd360'].includes(a.institution))
+    && [a.name.toLowerCase(), ...(INST_NAMES[a.institution] || [])].some(n => n && n.length >= 3 && new RegExp(`(^|[^\\p{L}\\d])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\d])`, 'u').test(raw)));
+}
 
 const numbersOf = (state, id) => { const a = state.accounts.find(x => x.id === id); return a ? [...a.cards, ...a.numbers] : []; };
 function isPair(state, debit, credit) {
@@ -693,6 +735,7 @@ function matchInternal(state, tx) {
     Object.assign(tx, { internal: true, link: best.id, category: 'internalTransfer', catSource: 'kind' });
     return true;
   }
+  if (!tx.internal && isWalletTopup(state, tx)) tx.internal = true;
   if (tx.internal) { tx.category = 'internalTransfer'; tx.catSource = 'kind'; return false; }
   if (['transferOut', 'transferIn'].includes(tx.kind) && tx.counterparty
       && state.settings.ownerNames.some(n => n && tx.counterparty.toLowerCase().includes(n.toLowerCase()))) tx.review.push('possibleInternal');
@@ -745,6 +788,77 @@ export function ingest(state, items, now = Date.now()) {
     state.txs.push(tx); rep.added.push(tx.id); if (tx.review.length) rep.review.push(tx.id);
   }
   return rep;
+}
+
+// ───────────────────────── History (self-healing) ─────────────────────────
+// state.log  = every raw input ever received (SMS text, statement rows, manual entries)
+// state.ops  = every user correction, keyed by the transaction's first source id
+// When PARSER_VERSION changes, transactions are rebuilt from the log and corrections are replayed.
+
+/** Ingest and remember the raw inputs. Use this instead of ingest() for new data. */
+export function record(state, items, now = Date.now()) {
+  state.log ||= [];
+  for (const it of items) {
+    if (it.src) state.log.push(it.src);
+    else if (it.type === 'record') state.log.push({ k: 'rec', rec: it.rec });
+    else if (it.id && it.source) state.log.push({ k: 'rec', rec: it });
+  }
+  return ingest(state, items, now);
+}
+
+function applyOp(state, t, op) {
+  switch (op.op) {
+    case 'cat': recategorize(state, t.id, op.category, op.learn); break;
+    case 'resolve': resolve(state, t.id, op.action, op.data || {}); break;
+    case 'exclude': t.excluded = !!op.value; break;
+    case 'delete': deleteTx(state, t.id); break;
+  }
+}
+
+/** A user correction. It is applied now and replayed after every rebuild. */
+export function userOp(state, id, op) {
+  const t = state.txs.find(x => x.id === id);
+  if (!t) return;
+  const src = t.sources[0]?.id;
+  applyOp(state, t, op);
+  if (src) (state.ops ||= []).push({ ...op, src });
+}
+
+function legacyFixes(state) {
+  for (const t of state.txs) {
+    if (['user', 'learned'].includes(t.catSource) || t.internal) continue;
+    if (isWalletTopup(state, t)) Object.assign(t, { internal: true, category: 'internalTransfer', catSource: 'kind' });
+  }
+  // Old wallet "add money" messages were read as a second purchase: same card + amount within 3 minutes of a top-up.
+  for (const t of state.txs) {
+    if (t.internal || t.merchant || t.kind !== 'purchase' || ['user', 'learned'].includes(t.catSource)) continue;
+    const twin = state.txs.find(o => o !== t && o.internal && o.direction === 'debit' && o.base === t.base && o.card && o.card === t.card && Math.abs(o.ts - t.ts) <= 3 * 60e3);
+    if (twin) Object.assign(t, { internal: true, category: 'internalTransfer', catSource: 'kind', link: twin.id });
+  }
+}
+
+/** Re-process the whole history with the current parser and replay the user's corrections. */
+export function rebuild(state, now = Date.now()) {
+  const log = state.log || [];
+  state.txs = []; state.seen = {}; state.ignored = [];
+  state.balances = state.balances.filter(b => b.source === 'manual');
+  for (const e of log) if (e.k === 'tx') { const t = JSON.parse(JSON.stringify(e.tx)); state.txs.push(t); for (const s of t.sources) state.seen[s.id] = 1; }
+  const items = log.filter(e => e.k !== 'tx').map(e => (e.k === 'sms' ? parseSMS(e.text, e.sender, e.ts, state.templates, e.ai) : { type: 'record', rec: e.rec }));
+  ingest(state, items, now);
+  legacyFixes(state);
+  for (const op of state.ops || []) {
+    const t = state.txs.find(x => x.sources.some(s => s.id === op.src));
+    if (t) applyOp(state, t, op);
+  }
+  state.parserVersion = PARSER_VERSION;
+}
+
+/** Bring saved data up to date. Returns true if it changed. */
+export function upgrade(state) {
+  let changed = migrate(state);
+  if (!state.log) { state.log = state.txs.map(t => ({ k: 'tx', tx: t })); state.ops = []; changed = true; }
+  if (state.parserVersion !== PARSER_VERSION) { rebuild(state); changed = true; }
+  return changed;
 }
 
 /** One-time rule migrations for saved data. Returns true if anything changed. */
