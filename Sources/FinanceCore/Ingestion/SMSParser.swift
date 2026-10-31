@@ -75,7 +75,7 @@ public struct SMSParser: Sendable {
 
     static let balanceLabels = ["الرصيد", "رصيد", "balance", "bal", "avail", "المتاح", "available"]
     static let feeLabels = ["رسوم", "fee", "عمولة", "vat", "ضريبة"]
-    static let merchantLabels = ["لدى:", "لدى", "عند:", "عند", "التاجر:", "التاجر", "merchant:", "merchant", "at:", " at ", "من:", "from:", "في متجر", "المتجر:"]
+    static let merchantLabels = ["لدى:", "لدى", "عند:", "عند", "التاجر:", "التاجر", "merchant:", "merchant", "at:", " at ", "من:", "from:", "في متجر", "المتجر:", "من "]
     static let counterpartyOutLabels = ["إلى:", "الى:", "إلى", "الى", "to:", " to ", "المستفيد:", "المستفيد", "beneficiary:", "beneficiary", "لصالح"]
     static let counterpartyInLabels = ["من:", "from:", "المرسل:", "المرسل", "sender:", "by:", " from "]
 
@@ -187,7 +187,7 @@ public struct SMSParser: Sendable {
         if kind == .purchase && merchant == nil { confidence -= 0.2 }
 
         let card = Self.capture(Self.cardRegex, in: normalized)
-        let account = Self.capture(Self.accountRegex, in: normalized)
+        let account = Self.capture(Self.accountRegex, in: normalized) ?? Self.capture(Self.accountLineRegex, in: normalized)
         let cpAccount = Self.counterpartyAccount(in: normalized)
         let reference = Self.capture(Self.referenceRegex, in: normalized)
 
@@ -299,6 +299,8 @@ public struct SMSParser: Sendable {
     static let accountRegex = try! NSRegularExpression(
         pattern: #"(?:من حساب|حساب|الحساب|account|acct|a/c|ac)[^\d\n]{0,15}?[*xX#•.]+\s*(\d{4})(?!\d)|(?:من حساب|حساب|الحساب|account|a/c)\s*(?:رقم|no\.?)?\s*[:：]?\s*\d*?(\d{4})(?!\d)"#,
         options: [.caseInsensitive])
+    /// SNB style: a line "من 2002*" = debited account last 4.
+    static let accountLineRegex = try! NSRegularExpression(pattern: #"^\s*من\s*\*?(\d{4})\*?\s*$"#, options: [.anchorsMatchLines])
     static let referenceRegex = try! NSRegularExpression(
         pattern: #"(?:مرجع|الرقم المرجعي|رقم العملية|رقم المرجع|ref(?:erence)?(?:\s*no)?\.?)\s*[:：#]?\s*([A-Za-z0-9]{5,})"#,
         options: [.caseInsensitive])

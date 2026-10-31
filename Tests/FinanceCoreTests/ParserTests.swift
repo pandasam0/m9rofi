@@ -195,3 +195,18 @@ final class EMLTests: XCTestCase {
         XCTAssertTrue(s.smsTemplates.isEmpty)
     }
 }
+
+final class RealSNBSamplesTests: XCTestCase {
+    func testSNBOctober2026Formats() throws {
+        let a = try XCTUnwrap(Fx.sms("شراء-POS\nبـSAR 1\nمن Shahrazad\nمدى-ابل*3098\nفي 19:13 31/10/26").record)
+        XCTAssertEqual(a.kind, .purchase)
+        XCTAssertEqual(a.amount, 1)
+        XCTAssertEqual(a.merchant, "Shahrazad")
+        XCTAssertEqual(a.cardLast4, "3098")
+        XCTAssertEqual(a.date, Fx.date("2026-10-31 19:13"))
+        let b = try XCTUnwrap(Fx.sms("شراء انترنت\nبـSAR 150\nمن 2002*\nمن barq\nمدى-ابل *3098\nفي 17:05 31/10/26").record)
+        XCTAssertEqual(b.merchant, "barq")
+        XCTAssertEqual(b.accountLast4, "2002")
+        XCTAssertEqual(b.amount, 150)
+    }
+}

@@ -141,7 +141,7 @@ export const CURRENCY = { 'sar': 'SAR', 'sr': 'SAR', 'ر.س': 'SAR', 'ر س': 'S
   'kwd': 'KWD', 'bhd': 'BHD', 'qar': 'QAR', 'omr': 'OMR', 'egp': 'EGP', 'try': 'TRY', 'jod': 'JOD', 'inr': 'INR', 'jpy': 'JPY', 'cny': 'CNY' };
 const BALANCE_LBL = ['الرصيد', 'رصيد', 'balance', 'bal', 'avail', 'المتاح', 'available'];
 const FEE_LBL = ['رسوم', 'fee', 'عمولة', 'vat', 'ضريبة'];
-const MERCHANT_LBL = ['لدى:', 'لدى', 'عند:', 'عند', 'التاجر:', 'التاجر', 'merchant:', 'merchant', 'at:', ' at ', 'من:', 'from:', 'في متجر', 'المتجر:'];
+const MERCHANT_LBL = ['لدى:', 'لدى', 'عند:', 'عند', 'التاجر:', 'التاجر', 'merchant:', 'merchant', 'at:', ' at ', 'من:', 'from:', 'في متجر', 'المتجر:', 'من '];
 const OUT_LBL = ['إلى:', 'الى:', 'إلى', 'الى', 'to:', ' to ', 'المستفيد:', 'المستفيد', 'beneficiary:', 'beneficiary', 'لصالح'];
 const IN_LBL = ['من:', 'from:', 'المرسل:', 'المرسل', 'sender:', 'by:', ' from '];
 const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -166,6 +166,8 @@ const CARD_RE = /(?:بطاقة|البطاقة|card|مدى|mada|visa|فيزا|م�
 const ACCT_RE = /(?:من حساب|حساب|الحساب|account|acct|a\/c|ac)[^\d\n]{0,15}?[*xX#•.]+\s*(\d{4})(?!\d)|(?:من حساب|حساب|الحساب|account|a\/c)\s*(?:رقم|no\.?)?\s*[:：]?\s*\d*?(\d{4})(?!\d)/i;
 const REF_RE = /(?:مرجع|الرقم المرجعي|رقم العملية|رقم المرجع|ref(?:erence)?(?:\s*no)?\.?)\s*[:：#]?\s*([A-Za-z0-9]{5,})/i;
 const cap = (re, t) => { const m = re.exec(t); return m ? (m[1] || m[2] || null) : null; };
+// SNB style: a line "من 2002*" = debited account last 4.
+const ACCT_LINE_RE = /^\s*من\s*\*?(\d{4})\*?\s*$/m;
 
 export function counterpartyAccount(text) {
   const iban = /SA\d{2}[\d\s]{18,26}/i.exec(text);
@@ -266,7 +268,7 @@ export function parseSMS(text, sender = null, receivedAt = Date.now(), templates
   const pd = parseDate(n);
   return { type: 'record', rec: { source: 'sms', id, amount, currency, base, direction, kind, status,
     ts: pd?.ts ?? receivedAt, hasTime: pd ? pd.hasTime : true, merchant, counterparty,
-    card: cap(CARD_RE, n), acct: cap(ACCT_RE, n), cpAcct: counterpartyAccount(n), balance, ref: cap(REF_RE, n), hint: sender,
+    card: cap(CARD_RE, n), acct: cap(ACCT_RE, n) || cap(ACCT_LINE_RE, n), cpAcct: counterpartyAccount(n), balance, ref: cap(REF_RE, n), hint: sender,
     confidence: Math.max(0, confidence) } };
 }
 

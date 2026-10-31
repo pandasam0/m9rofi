@@ -471,13 +471,11 @@ function guide() {
   setTitle('خطوات الإعداد');
   $('#view').innerHTML = `
   <div class="card"><h3>١. أضف حساباتك</h3><p>من «المزيد ← الحسابات» أضف الأهلي وBarq وD360، واكتب آخر 4 أرقام لكل بطاقة وحساب.</p><a class="btn" href="#accounts">الحسابات</a></div>
-  <div class="card"><h3>٢. اختصار رسائل البنك (مرة لكل بنك)</h3><ol>
-    <li>افتح تطبيق <b>الاختصارات</b> ← <b>الأتمتة</b> ← <b>+</b> ← <b>رسالة</b>.</li>
-    <li><b>المرسل</b>: اختر البنك. <b>الرسالة تحتوي</b>: اكتب <code>SAR</code> أو <code>ريال</code>.</li>
-    <li>اختر <b>تشغيل فوراً</b> ← التالي ← <b>اختصار جديد فارغ</b>.</li>
-    <li>أضف إجراء <b>نص</b> واكتب فيه بالضبط (السطر الأول ثم سطر جديد):<pre class="code">###|sms|[التاريخ الحالي]|[المرسل]
-[المحتوى]</pre>بدل الأقواس اضغط وأدرج المتغيرات: <b>التاريخ الحالي</b> (اضغط عليه واختر التنسيق <b>ISO 8601</b>)، و<b>مُدخل الاختصار ← المرسل</b>، و<b>مُدخل الاختصار ← المحتوى</b>.</li>
-    <li>أضف إجراء <b>إلحاق بملف نصي</b> (Append to Text File): الملف <code>m9rofi.txt</code>، فعّل «سطر جديد».</li></ol></div>
+  <div class="card"><h3>٢. اختصار رسائل البنك (مرة واحدة لكل البنوك)</h3><ol>
+    <li>الاختصارات ← <b>Automation</b> ← <b>+</b> ← <b>Edit</b> ← زر <b>Automation</b> ← <b>Message</b>.</li>
+    <li>اضغط <b>Add Filter</b> واختر <b>Message contains</b> واكتب: <code>SAR</code></li>
+    <li>ابحث عن إجراء <b>Text</b> والصق فيه:<pre class="code">###|sms</pre>ثم سطر جديد ← <b>Select Variable</b> ← <b>Message</b>.</li>
+    <li>ابحث عن إجراء <b>Append to Text File</b>، واكتب في File Path: <code>m9rofi.txt</code></li></ol></div>
   <div class="card"><h3>٣. اختصار Apple Pay</h3><ol>
     <li><b>الأتمتة</b> ← <b>+</b> ← <b>معاملة</b> ← اختر كل البطاقات ← <b>تشغيل فوراً</b>.</li>
     <li>إجراء <b>نص</b>:<pre class="code">###|pay|[التاريخ الحالي]|[البطاقة]|[التاجر]|[المبلغ]</pre>(التاريخ بتنسيق ISO 8601، والبقية من مُدخل الاختصار).</li>
