@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="مصروفي">
+<meta name="theme-color" content="#0b6e4f">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; script-src 'self'">
+<title>مصروفي</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="top"><h1 id="title">مصروفي</h1><div id="actions"></div></header>
+<main id="view"></main>
+<nav id="tabs">
+  <a href="#home" data-tab="home"><span>🏠</span>الرئيسية</a>
+  <a href="#txs" data-tab="txs"><span>📋</span>العمليات</a>
+  <a href="#ask" data-tab="ask"><span>💬</span>المساعد</a>
+  <a href="#reports" data-tab="reports"><span>📊</span>التقارير</a>
+  <a href="#more" data-tab="more"><span>⚙️</span>المزيد</a>
+</nav>
+<div id="sheet" hidden><div id="sheet-body"></div></div>
+<input type="file" id="file" hidden>
+<script type="module" src="app.js"></script>
+</body>
+</html>
