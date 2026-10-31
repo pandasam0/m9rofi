@@ -169,9 +169,14 @@ const cap = (re, t) => { const m = re.exec(t); return m ? (m[1] || m[2] || null)
 // SNB style: a line "من 2002*" = debited account last 4.
 const ACCT_LINE_RE = /^\s*من\s*\*?(\d{4})\*?\s*$/m;
 
+// "لحساب2002" = destination account (not the debited one).
+const TO_ACCT_RE = /(?:لحساب|للحساب|إلى حساب|الى حساب|to account)\s*[:：]?\s*\*?\s*(\d{4})(?!\d)/gi;
 export function counterpartyAccount(text) {
   const iban = /SA\d{2}[\d\s]{18,26}/i.exec(text);
   if (iban) return iban[0].replace(/\D/g, '').slice(-4);
+  // Barq style: "لحساب2002"
+  const to = new RegExp(TO_ACCT_RE.source, 'i').exec(text);
+  if (to) return to[1];
   const lower = text.toLowerCase();
   for (const l of ['إلى', 'الى', 'to', 'للحساب', 'المستفيد']) {
     const i = lower.indexOf(l);
@@ -265,10 +270,15 @@ export function parseSMS(text, sender = null, receivedAt = Date.now(), templates
   else merchant = labelled(n, MERCHANT_LBL);
   if (kind === 'purchase' && !merchant) confidence -= 0.2;
 
+  // Balance written without currency, e.g. Barq "رصيد106.78"
+  if (balance === null) { const bm = /(?:الرصيد|رصيد|balance)\s*[:：]?\s*(\d[\d,]*(?:\.\d{1,2})?)/i.exec(n); if (bm) balance = parseHalalas(bm[1]); }
+  let cpAcct = counterpartyAccount(n);
+  // SNB incoming transfer: "من KHALIL SAMMAN 0032*" → sender account last 4
+  if (!cpAcct && kind === 'transferIn') { const m = /من\s+[^\n]*?\*?(\d{4})\*/.exec(n); if (m) cpAcct = m[1]; }
   const pd = parseDate(n);
   return { type: 'record', rec: { source: 'sms', id, amount, currency, base, direction, kind, status,
     ts: pd?.ts ?? receivedAt, hasTime: pd ? pd.hasTime : true, merchant, counterparty,
-    card: cap(CARD_RE, n), acct: cap(ACCT_RE, n) || cap(ACCT_LINE_RE, n), cpAcct: counterpartyAccount(n), balance, ref: cap(REF_RE, n), hint: sender,
+    card: cap(CARD_RE, n), acct: cap(ACCT_RE, n.replace(TO_ACCT_RE, ' ')) || cap(ACCT_LINE_RE, n), cpAcct, balance, ref: cap(REF_RE, n), hint: sender,
     confidence: Math.max(0, confidence) } };
 }
 

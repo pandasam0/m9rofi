@@ -183,3 +183,18 @@ test('real SNB formats (Oct 2026)', () => {
   const b = E.parseSMS('شراء انترنت\nبـSAR 150\nمن 2002*\nمن barq\nمدى-ابل *3098\nفي 17:05 31/10/26', 'SNB-AlAhli', 0).rec;
   assert.deepEqual([b.kind, b.amount, b.merchant, b.card, b.acct], ['purchase', 15000, 'barq', '3098', '2002']);
 });
+
+test('real Barq ↔ SNB transfer is internal', () => {
+  const st = L();
+  st.accounts[0].numbers = ['2002']; st.accounts[1].numbers = ['0032'];
+  const barqOut = 'حوالة صادرة محلية\nمبلغ1.00SAR\nرسوم0.00SAR\nلحساب2002\n2026-10-31 19:24';
+  const snbIn = 'حوالة واردة محلية ب SAR 1\nمن KHALIL SAMMAN 0032*\n31/10/26 19:26';
+  const o = E.parseSMS(barqOut, null, 0).rec, i = E.parseSMS(snbIn, null, 0).rec;
+  assert.deepEqual([o.kind, o.amount, o.cpAcct], ['transferOut', 100, '2002']);
+  assert.deepEqual([i.kind, i.amount, i.cpAcct], ['transferIn', 100, '0032']);
+  E.ingest(st, [{ type: 'record', rec: o }, { type: 'record', rec: i }], NOW);
+  const m = month(st);
+  assert.deepEqual([m.spending, m.transfersIn, m.internalCount], [0, 0, 2]);
+  const p = E.parseSMS('شراء نقاط بيع\nفيزاSAR 30.00\nرصيد106.78\nلدىQatrat\n2026-10-31 18:28', null, 0).rec;
+  assert.deepEqual([p.kind, p.amount, p.merchant, p.balance], ['purchase', 3000, 'Qatrat', 10678]);
+});
