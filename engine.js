@@ -11,11 +11,28 @@ export const CATEGORIES = {
   subscriptions: ['الاشتراكات', '🔁'], entertainment: ['الترفيه والألعاب', '🎮'], travel: ['السفر والفنادق', '✈️'],
   health: ['الصحة والرياضة', '💊'], bills: ['الفواتير والخدمات', '🧾'], transfers: ['التحويلات المالية', '↔️'],
   cash: ['السحب النقدي', '💵'], personal: ['المصروفات الشخصية', '💈'], other: ['أخرى', '•'],
-  salary: ['الراتب', '💼'], otherIncome: ['دخل آخر', '➕'], internalTransfer: ['تحويل داخلي', '🔄'],
+  family: ['تحويلات العائلة', '👨‍👩‍👧‍👦'],
+  salary: ['الراتب', '💼'], allowance: ['المصروف الأسبوعي', '💰'], otherIncome: ['دخل آخر', '➕'], internalTransfer: ['تحويل داخلي', '🔄'],
 };
 export const EXPENSE_CATEGORIES = ['dining', 'coffee', 'groceries', 'shopping', 'auto', 'transport', 'subscriptions',
-  'entertainment', 'travel', 'health', 'bills', 'transfers', 'cash', 'personal', 'other'];
+  'entertainment', 'travel', 'health', 'bills', 'family', 'transfers', 'cash', 'personal', 'other'];
 export const isExpenseCat = c => EXPENSE_CATEGORIES.includes(c);
+export const INCOME_CATEGORIES = ['salary', 'allowance', 'otherIncome'];
+export const isIncomeCat = c => INCOME_CATEGORIES.includes(c);
+
+// Family = counterparty shares the owner's family name (last word), but is not the owner.
+const normName = s => normDigits(s || '').toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي')
+  .replace(/^ال/, '').replace(/[^\p{L}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+export function relation(counterparty, ownerNames = []) {
+  const cp = normName(counterparty);
+  if (!cp.length) return null;
+  for (const o of ownerNames) {
+    const on = normName(o);
+    if (on.length && on.join(' ') === cp.join(' ')) return 'self';
+  }
+  const surnames = new Set(ownerNames.map(o => normName(o).pop()).filter(x => x && x.length >= 3));
+  return surnames.has(cp[cp.length - 1]) && cp.length >= 2 ? 'family' : null;
+}
 export const catName = c => (CATEGORIES[c] || CATEGORIES.other)[0];
 export const catIcon = c => (CATEGORIES[c] || CATEGORIES.other)[1];
 
@@ -485,7 +502,7 @@ const KEYWORDS = [
   ['subscriptions', ['subscription', 'اشتراك', 'membership', 'عضوية', 'premium']],
 ];
 
-export function categorize(tx, rules) {
+export function categorize(tx, rules, settings = {}) {
   const by = (category, source, confidence) => ({ category, source, confidence });
   if (tx.internal) return by('internalTransfer', 'kind', 1);
   switch (tx.kind) {
@@ -497,6 +514,8 @@ export function categorize(tx, rules) {
   if (tx.kind === 'fee' && !tx.merchant) return by('bills', 'kind', 0.8);
   const key = tx.mkey || merchantKey(tx.merchant || tx.counterparty || tx.note || '');
   if (key && rules[key]) return by(rules[key], 'learned', 1);
+  if ((tx.kind === 'transferOut' || tx.kind === 'transferIn') && relation(tx.counterparty, settings.ownerNames) === 'family')
+    return by(tx.kind === 'transferOut' ? 'family' : 'allowance', 'family', 0.9);
   if (tx.kind === 'transferOut') return by('transfers', 'kind', 0.9);
   if (tx.kind === 'transferIn') return by('otherIncome', 'kind', 0.9);
   const padded = ` ${key} `;
@@ -617,7 +636,7 @@ function merge(state, inc, i) {
 }
 
 function applyCategory(state, t) {
-  const d = categorize(t, state.rules);
+  const d = categorize(t, state.rules, state.settings);
   t.category = d.category; t.catSource = d.source; t.catConf = d.confidence;
 }
 
@@ -728,6 +747,17 @@ export function ingest(state, items, now = Date.now()) {
   return rep;
 }
 
+export function refreshCategories(state) {
+  let n = 0;
+  for (const t of state.txs) {
+    if (['user', 'learned'].includes(t.catSource) || t.internal) continue;
+    const before = t.category;
+    applyCategory(state, t);
+    if (t.category !== before) n++;
+  }
+  return n;
+}
+
 export function recategorize(state, id, category, learn = true) {
   const t = state.txs.find(x => x.id === id); if (!t) return;
   Object.assign(t, { category, catSource: 'user', catConf: 1 });
@@ -787,8 +817,8 @@ export function effect(state, t) {
     return { type: 'expense', amount: a, category: isExpenseCat(t.category) ? t.category : 'other' };
   }
   if (t.kind === 'refund') return { type: 'refund', amount: a, category: isExpenseCat(t.category) ? t.category : 'other' };
-  if (t.kind === 'income') return { type: 'income', amount: a, category: t.category === 'otherIncome' ? 'otherIncome' : 'salary' };
-  if (userCat && (t.category === 'salary' || t.category === 'otherIncome')) return { type: 'income', amount: a, category: t.category };
+  if (t.kind === 'income') return { type: 'income', amount: a, category: isIncomeCat(t.category) ? t.category : 'salary' };
+  if ((userCat || t.catSource === 'family') && isIncomeCat(t.category)) return { type: 'income', amount: a, category: t.category };
   if (userCat && isExpenseCat(t.category)) return { type: 'refund', amount: a, category: t.category };
   return { type: 'transferIn', amount: a };
 }

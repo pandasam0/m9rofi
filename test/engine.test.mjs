@@ -221,7 +221,19 @@ test('real weekly allowance: SNB + D360 (Oct 31)', () => {
   const m = month(st);
   assert.equal(m.spending, 75000);                 // 3 × 250 to siblings
   assert.equal(m.byCategory[0].category, 'transfers');
-  assert.equal(m.transfersIn, 100000);             // 1000 from Rami: not income
+  assert.equal(m.transfersIn, 100000);             // without owner name: 1000 from Rami is an incoming transfer, not income
   assert.equal(m.income, 0);
+  // With the owner's name, family transfers are recognised automatically.
+  st.settings.ownerNames = ['خليل سمان', 'KHALIL SAMMAN'];
+  E.refreshCategories(st);
+  const f = month(st);
+  assert.equal(f.income, 100000);                  // weekly allowance from Rami
+  assert.equal(f.transfersIn, 0);
+  assert.equal(f.spending, 75000);
+  assert.deepEqual(f.byCategory.map(c => [c.category, c.amount]), [['family', 75000]]);
+  assert.equal(E.relation('KHALIL SAMMAN', st.settings.ownerNames), 'self');
+  assert.equal(E.relation('ELHAM SAMMAN', st.settings.ownerNames), 'family');
+  assert.equal(E.relation('رامي سمان', st.settings.ownerNames), 'family');
+  assert.equal(E.relation('Ahmed Ali', st.settings.ownerNames), null);
   assert.equal(m.internalCount, 2);                // SNB → D360 top-up legs
 });
