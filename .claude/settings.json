@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(web/publish.sh)",
+      "Bash(./web/publish.sh)"
+    ]
+  }
+}
