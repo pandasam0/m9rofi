@@ -517,7 +517,7 @@ function guide() {
 
 // ───────────── Boot ─────────────
 (async () => {
-  try { const s = HOST ? HOST.state : await load(); if (s) { state = { ...E.newState(), ...s, settings: { ...E.newState().settings, ...s.settings } }; const m = E.upgrade(state); if (E.refreshCategories(state) || m) await save(); } } catch { /* first run */ }
+  try { const s = HOST ? HOST.state : await load(); if (s) { state = { ...E.newState(), ...s, log: s.log || null, ops: s.ops || [], parserVersion: s.parserVersion || 0, settings: { ...E.newState().settings, ...s.settings, rulesVersion: s.settings?.rulesVersion || 1 } }; const m = E.upgrade(state); if (E.refreshCategories(state) || m) await save(); } } catch { /* first run */ }
   if (!HOST && navigator.storage?.persist) navigator.storage.persist();
   if (!HOST && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   render();
