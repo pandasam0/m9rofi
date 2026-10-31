@@ -48,7 +48,9 @@ export function parseHalalas(raw) {
 
 export function fnv1a(str) {
   let h = 0xcbf29ce484222325n;
-  for (const b of new TextEncoder().encode(str)) { h ^= BigInt(b); h = (h * 0x100000001b3n) & 0xffffffffffffffffn; }
+  const bytes = typeof TextEncoder !== 'undefined' ? new TextEncoder().encode(str)
+    : Array.from(unescape(encodeURIComponent(str)), c => c.charCodeAt(0)); // Scriptable runtime has no TextEncoder
+  for (const b of bytes) { h ^= BigInt(b); h = (h * 0x100000001b3n) & 0xffffffffffffffffn; }
   return h.toString(16);
 }
 
