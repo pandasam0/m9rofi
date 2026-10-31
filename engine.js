@@ -12,7 +12,7 @@ export const CATEGORIES = {
   health: ['الصحة والرياضة', '💊'], bills: ['الفواتير والخدمات', '🧾'], transfers: ['التحويلات المالية', '↔️'],
   cash: ['السحب النقدي', '💵'], personal: ['المصروفات الشخصية', '💈'], other: ['أخرى', '•'],
   family: ['تحويلات العائلة', '👨‍👩‍👧‍👦'],
-  salary: ['الراتب', '💼'], allowance: ['المصروف الأسبوعي', '💰'], otherIncome: ['دخل آخر', '➕'], internalTransfer: ['تحويل داخلي', '🔄'],
+  salary: ['الراتب', '💼'], allowance: ['الراتب الأسبوعي', '💰'], otherIncome: ['دخل آخر', '➕'], internalTransfer: ['تحويل داخلي', '🔄'],
 };
 export const EXPENSE_CATEGORIES = ['dining', 'coffee', 'groceries', 'shopping', 'auto', 'transport', 'subscriptions',
   'entertainment', 'travel', 'health', 'bills', 'family', 'transfers', 'cash', 'personal', 'other'];
@@ -530,7 +530,7 @@ export function categorize(tx, rules, settings = {}) {
 // ───────────────────────── Ledger ─────────────────────────
 export function newState() {
   return { v: 1, accounts: [], txs: [], balances: [], budgets: {}, rules: {}, seen: {}, templates: [], ignored: [],
-    settings: { externalTransfersAsSpending: true, cashAsSpending: false, ownerNames: [] }, fired: {} };
+    settings: { externalTransfersAsSpending: false, cashAsSpending: false, ownerNames: [], rulesVersion: 2 }, fired: {} };
 }
 
 const uid = () => (globalThis.crypto?.randomUUID?.() || 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36));
@@ -747,6 +747,13 @@ export function ingest(state, items, now = Date.now()) {
   return rep;
 }
 
+/** One-time rule migrations for saved data. Returns true if anything changed. */
+export function migrate(state) {
+  const s = state.settings;
+  if ((s.rulesVersion || 1) < 2) { s.externalTransfersAsSpending = false; s.rulesVersion = 2; return true; }
+  return false;
+}
+
 export function refreshCategories(state) {
   let n = 0;
   for (const t of state.txs) {
@@ -813,7 +820,12 @@ export function effect(state, t) {
   const userCat = ['user', 'learned'].includes(t.catSource);
   if (t.direction === 'debit') {
     if (t.kind === 'cashWithdrawal') return state.settings.cashAsSpending ? { type: 'expense', amount: a, category: 'cash' } : { type: 'cash', amount: a };
-    if (t.kind === 'transferOut') return state.settings.externalTransfersAsSpending ? { type: 'expense', amount: a, category: isExpenseCat(t.category) ? t.category : 'transfers' } : { type: 'excluded' };
+    if (t.kind === 'transferOut') {
+      // Family transfers and transfers the user categorised are spending; other transfers are shown but not counted (setting).
+      if (t.category === 'family' || (userCat && isExpenseCat(t.category)) || state.settings.externalTransfersAsSpending)
+        return { type: 'expense', amount: a, category: isExpenseCat(t.category) ? t.category : 'transfers' };
+      return { type: 'transferOut', amount: a };
+    }
     return { type: 'expense', amount: a, category: isExpenseCat(t.category) ? t.category : 'other' };
   }
   if (t.kind === 'refund') return { type: 'refund', amount: a, category: isExpenseCat(t.category) ? t.category : 'other' };
@@ -835,7 +847,7 @@ export const prevPeriod = (kind, ts) => period(kind, period(kind, ts)[0] - 1);
 export function lastDays(n, now) { const s = startOfDay(now); return [s - (n - 1) * 864e5, s + 864e5]; }
 
 export function summary(state, [start, end], now = Date.now(), filter = {}) {
-  const s = { start, end, spending: 0, gross: 0, refunds: 0, income: 0, transfersIn: 0, cash: 0, pending: 0, pendingCount: 0,
+  const s = { start, end, spending: 0, gross: 0, refunds: 0, income: 0, transfersIn: 0, transfersOut: 0, cash: 0, pending: 0, pendingCount: 0,
     unconfirmed: 0, unconfirmedCount: 0, internalCount: 0, count: 0, expenseCount: 0, byCategory: [], byMerchant: [], dailyAvg: 0 };
   const cat = {}, mer = {};
   for (const t of state.txs) {
@@ -859,6 +871,7 @@ export function summary(state, [start, end], now = Date.now(), filter = {}) {
         break;
       case 'income': s.income += e.amount; s.count++; break;
       case 'transferIn': s.transfersIn += e.amount; s.count++; break;
+      case 'transferOut': s.transfersOut += e.amount; s.count++; break;
       case 'cash': s.cash += e.amount; s.count++; break;
       case 'internal': s.internalCount++; break;
       case 'pending': if (t.direction === 'debit') s.pending += e.amount; s.pendingCount++; break;
@@ -1120,7 +1133,7 @@ export function answer(state, question, now = Date.now()) {
       return res(`إجمالي أرصدتك: ${sar(d.total)}.` + d.balances.map(b => `\n• ${b.account.name}: ${b.latest ? `${sar(b.latest.balance)} (${fmtDate(b.latest.ts, false)})` : 'لا يوجد رصيد'}`).join(''), d.total);
     }
     case 'salary': {
-      const sal = state.txs.filter(t => { const e = effect(state, t); return e.type === 'income' && e.category === 'salary' && t.ts <= now; }).sort((a, b) => b.ts - a.ts)[0];
+      const sal = state.txs.filter(t => { const e = effect(state, t); return e.type === 'income' && (e.category === 'salary' || e.category === 'allowance') && t.ts <= now; }).sort((a, b) => b.ts - a.ts)[0];
       if (!sal) return res('لا يوجد راتب مسجل بعد.', null);
       const s = summary(state, [sal.ts, now + 1], now);
       const left = sal.base - s.spending;
@@ -1167,7 +1180,7 @@ export function answer(state, question, now = Date.now()) {
 // ───────────────────────── Export ─────────────────────────
 export function exportCSV(state, [start, end]) {
   const head = ['التاريخ', 'الجهة', 'التصنيف', 'المبلغ', 'العملة', 'بالريال', 'الأثر', 'الحالة', 'الحساب', 'المصدر'];
-  const eff = { expense: 'مصروف', refund: 'مسترد', income: 'دخل', transferIn: 'تحويل وارد', cash: 'سحب نقدي', internal: 'تحويل داخلي', pending: 'معلقة', unconfirmed: 'قيد المراجعة', excluded: 'مستبعدة' };
+  const eff = { expense: 'مصروف', refund: 'مسترد', income: 'دخل', transferIn: 'تحويل وارد', transferOut: 'تحويل صادر غير محتسب', cash: 'سحب نقدي', internal: 'تحويل داخلي', pending: 'معلقة', unconfirmed: 'قيد المراجعة', excluded: 'مستبعدة' };
   const st = { pending: 'معلقة', completed: 'مكتملة', reversed: 'ملغاة', refunded: 'مستردة' };
   const q = v => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
   const rows = state.txs.filter(t => t.ts >= start && t.ts < end).sort((a, b) => a.ts - b.ts).map(t => [fmtDate(t.ts, t.hasTime), t.merchant || t.counterparty || '',
